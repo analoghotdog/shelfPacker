@@ -146,4 +146,136 @@
     const standardBoxes = [
         { name: "Box C",  l: 430, w: 280, h: 92  },
         { name: "Box D",  l: 435, w: 285, h: 187 },
-        { name
+        { name: "Box E",  l: 585, w: 435, h: 92  },
+        { name: "Box F",  l: 585, w: 435, h: 187 },
+        { name: "Box A1", l: 682, w: 427, h: 280 },
+        { name: "Box A",  l: 685, w: 427, h: 140 },
+        { name: "Box B",  l: 877, w: 432, h: 140 },
+        { name: "Box B1", l: 877, w: 432, h: 280 },
+        { name: "Box G",  l: 430, w: 280, h: 300 },
+        { name: "Box H",  l: 215, w: 280, h: 300 }
+    ];
+    // ------------------------------------------
+
+    let storagePlan = [];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const boxSelect = document.getElementById('box-select');
+
+        // Populate dropdown with your standard boxes
+        standardBoxes.forEach(box => {
+            const opt = document.createElement('option');
+            opt.value = box.name;
+            opt.textContent = `${box.name} (${box.l} × ${box.w} × ${box.h} mm)`;
+            boxSelect.appendChild(opt);
+        });
+
+        boxSelect.addEventListener('change', toggleCustomInputs);
+        document.getElementById('add-btn').addEventListener('click', addItem);
+        document.getElementById('clear-btn').addEventListener('click', () => {
+            storagePlan = [];
+            renderTable();
+        });
+
+        // Recalculate instantly when shelf dimensions change
+        document.querySelectorAll('#shelf-w, #shelf-d, #shelf-h').forEach(input => {
+            input.addEventListener('input', renderTable);
+        });
+
+        toggleCustomInputs();
+        renderTable();
+    });
+
+    function toggleCustomInputs() {
+        const isCustom = document.getElementById('box-select').value === 'custom';
+        document.getElementById('custom-inputs').style.display = isCustom ? 'grid' : 'none';
+    }
+
+    function addItem() {
+        const qty = parseInt(document.getElementById('item-qty').value) || 0;
+        if (qty <= 0) { alert("Please enter a quantity of at least 1."); return; }
+
+        let item;
+        const selectedVal = document.getElementById('box-select').value;
+
+        if (selectedVal === 'custom') {
+            const l = parseFloat(document.getElementById('custom-l').value) || 0;
+            const w = parseFloat(document.getElementById('custom-w').value) || 0;
+            const h = parseFloat(document.getElementById('custom-h').value) || 0;
+
+            if (l <= 0 || w <= 0 || h <= 0) { alert("Please enter valid custom dimensions."); return; }
+            item = { name: "Custom Artefact", l, w, h, qty };
+        } else {
+            const selectedBox = standardBoxes.find(b => b.name === selectedVal);
+            if (!selectedBox) return;
+            item = { ...selectedBox, qty };
+        }
+
+        storagePlan.push(item);
+        document.getElementById('item-qty').value = 1;
+        renderTable();
+    }
+
+    function getShelf() {
+        return {
+            w: parseFloat(document.getElementById('shelf-w').value) || 0,
+            d: parseFloat(document.getElementById('shelf-d').value) || 0,
+            h: parseFloat(document.getElementById('shelf-h').value) || 0
+        };
+    }
+
+    function renderTable() {
+        const tbody = document.querySelector('#plan-table tbody');
+        tbody.innerHTML = '';
+        let totalShelves = 0;
+        let totalItems = 0;
+        const shelf = getShelf();
+
+        storagePlan.forEach((item, index) => {
+            // Orientation 1: length along shelf width
+            const count1 = Math.floor(shelf.w / item.l) * Math.floor(shelf.d / item.w);
+            // Orientation 2: rotated 90 degrees
+            const count2 = Math.floor(shelf.w / item.w) * Math.floor(shelf.d / item.l);
+
+            const itemsPerLayer = Math.max(count1, count2);
+            const layers = Math.floor(shelf.h / item.h);
+            const actualMax = itemsPerLayer * layers;
+
+            let shelvesNeeded;
+            if (actualMax > 0) {
+                shelvesNeeded = Math.ceil(item.qty / actualMax);
+                totalShelves += shelvesNeeded;
+            } else {
+                shelvesNeeded = '<span class="warning">Too big for shelf</span>';
+            }
+
+            totalItems += item.qty;
+
+            const tr = document.createElement('tr');
+            if (actualMax === 0) tr.style.backgroundColor = '#fff0f0';
+            tr.innerHTML = `
+                <td><strong>${item.name}</strong></td>
+                <td>${item.qty}</td>
+                <td>${item.l} × ${item.w} × ${item.h}</td>
+                <td>${actualMax}</td>
+                <td><strong>${shelvesNeeded}</strong></td>
+                <td><button class="btn btn-danger delete-btn" data-index="${index}">Remove</button></td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        document.querySelectorAll('.delete-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const idx = parseInt(e.target.getAttribute('data-index'));
+                storagePlan.splice(idx, 1);
+                renderTable();
+            });
+        });
+
+        document.getElementById('total-items').innerText = totalItems;
+        document.getElementById('total-shelves').innerText = totalShelves;
+    }
+</script>
+
+</body>
+</html>
