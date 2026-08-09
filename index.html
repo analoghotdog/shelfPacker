@@ -6,81 +6,55 @@
     <title>Museum Storage Planner - Phase 1</title>
     <style>
         :root {
-            --bg: #f4f6f8;
-            --card-bg: #ffffff;
-            --text: #2c3e50;
-            --text-muted: #7f8c8d;
-            --primary: #34495e;
-            --accent: #2980b9;
-            --warning-bg: #fcf8e3;
-            --warning-text: #8a6d3b;
-            --info-bg: #e8f4f8;
-            --info-text: #31708f;
-            --border: #e0e6ed;
+            --bg: #f4f6f8; --card-bg: #ffffff; --text: #2c3e50; --text-muted: #7f8c8d;
+            --primary: #34495e; --accent: #2980b9; --border: #e0e6ed;
+            --info-bg: #e8f4f8; --info-text: #31708f; --danger: #e74c3c;
         }
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            margin: 0;
-            padding: 20px;
-            line-height: 1.6;
-        }
-
-        .container { max-width: 1200px; margin: 0 auto; }
-
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 20px; line-height: 1.6; }
+        .container { max-width: 1000px; margin: 0 auto; }
         header { margin-bottom: 30px; border-bottom: 3px solid var(--primary); padding-bottom: 10px; }
         h1 { margin: 0; color: var(--primary); font-size: 1.8rem; }
         h2 { color: var(--primary); font-size: 1.2rem; margin-top: 30px; border-bottom: 1px solid var(--border); padding-bottom: 5px; text-transform: uppercase; letter-spacing: 1px;}
+
+        .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 6px; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); margin-bottom: 20px; }
 
         .grid { display: grid; gap: 20px; }
         .grid-2 { grid-template-columns: 1fr 1fr; }
         .grid-3 { grid-template-columns: repeat(3, 1fr); }
 
-        @media (max-width: 900px) {
-            .grid-2, .grid-3 { grid-template-columns: 1fr; }
-        }
-
-        .card {
-            background: var(--card-bg);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 20px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.02);
-        }
+        @media (max-width: 700px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
 
         .form-group { margin-bottom: 15px; }
-        label {
-            display: block;
-            font-size: 0.75rem;
-            font-weight: 700;
-            color: var(--text-muted);
-            margin-bottom: 5px;
-            text-transform: uppercase;
+        label { display: block; font-size: 0.75rem; font-weight: 700; color: var(--text-muted); margin-bottom: 5px; text-transform: uppercase; }
+
+        input, select {
+            width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 4px;
+            font-size: 1rem; box-sizing: border-box; background: white;
         }
+        input:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(41, 128, 185, 0.1); }
 
-        input {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            font-size: 1rem;
-            box-sizing: border-box;
-            transition: border 0.2s;
+        .btn { padding: 10px 20px; border: none; border-radius: 4px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-primary:hover { background: #2471a3; }
+        .btn-danger { background: var(--danger); color: white; padding: 5px 10px; font-size: 0.8rem; }
+        .btn-secondary { background: #95a5a6; color: white; }
+        .btn-secondary:hover { background: #7f8c8d; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { text-align: left; padding: 12px; border-bottom: 1px solid var(--border); }
+        th { background-color: var(--bg); font-size: 0.8rem; text-transform: uppercase; color: var(--text-muted); }
+
+        .summary-box {
+            margin-top: 20px; padding: 20px; background: var(--info-bg); border: 1px solid #bce8f1;
+            border-radius: 6px; display: flex; justify-content: space-around; text-align: center;
         }
+        .summary-val { font-size: 2.5rem; font-weight: bold; color: var(--primary); display: block; }
+        .summary-label { font-size: 0.9rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600;}
 
-        input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(41, 128, 185, 0.1); }
-
-        .metric { margin-bottom: 12px; display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px dashed var(--border); padding-bottom: 8px;}
-        .metric-label { font-size: 0.9rem; color: var(--text-muted); }
-        .metric-value { font-size: 1.1rem; font-weight: 600; color: var(--primary); }
-
-        .alert { padding: 12px; border-radius: 4px; font-size: 0.9rem; margin-top: 15px; font-weight: 500; }
-        .alert-warning { background-color: var(--warning-bg); border: 1px solid #faebcc; color: var(--warning-text); }
-        .alert-info { background-color: var(--info-bg); border: 1px solid #bce8f1; color: var(--info-text); }
-        
-        .highlight-val { color: var(--accent); font-size: 1.4rem; font-weight: bold; }
+        .warning { color: var(--danger); font-weight: bold; font-size: 0.9rem; }
+        .hint { font-size: 0.8rem; color: var(--text-muted); margin-top: -10px; margin-bottom: 15px; font-style: italic;}
+        .table-header-row { display: flex; justify-content: space-between; align-items: center; }
     </style>
 </head>
 <body>
@@ -88,202 +62,88 @@
 <div class="container">
     <header>
         <h1>Museum Storage Planner</h1>
-        <p style="margin:5px 0 0 0; color:var(--text-muted);">Phase 1: Artefact & Standard Box Capacity Calculator (Dimensions in mm, Weight in kg)</p>
+        <p style="margin:5px 0 0 0; color:var(--text-muted);">Phase 1: Capacity & Shelf Requirement Calculator (dimensions in mm)</p>
     </header>
 
-    <section>
+    <section class="card">
         <h2>1. Shelf / Bay Specifications</h2>
-        <div class="card">
-            <div class="grid grid-2">
-                <div class="form-group">
-                    <label>Internal Width (mm)</label>
-                    <input type="number" id="shelf-w" value="900" min="0">
-                </div>
-                <div class="form-group">
-                    <label>Internal Depth (mm)</label>
-                    <input type="number" id="shelf-d" value="450" min="0">
-                </div>
-                <div class="form-group">
-                    <label>Clear Height (mm)</label>
-                    <input type="number" id="shelf-h" value="350" min="0">
-                </div>
-                <div class="form-group">
-                    <label>Max Weight Limit (kg)</label>
-                    <input type="number" id="shelf-weight" value="80" min="0">
-                </div>
-            </div>
-            <p style="font-size:0.8rem; color:var(--text-muted); margin-top:10px;">* "Clear Height" is the usable vertical space between shelves, not the total height of the upright.</p>
-        </div>
-    </section>
-
-    <section>
-        <h2>2. Item Definitions</h2>
         <div class="grid grid-3">
-            <!-- Item 1 -->
-            <div class="card">
-                <h3 style="margin-top:0; color:var(--accent);">Standard Box C</h3>
-                <div class="grid grid-2">
-                    <div class="form-group"><label>Length (mm)</label><input type="number" class="item-l" data-item="1" value="423"></div>
-                    <div class="form-group"><label>Width (mm)</label><input type="number" class="item-w" data-item="1" value="273"></div>
-                    <div class="form-group"><label>Height (mm)</label><input type="number" class="item-h" data-item="1" value="89"></div>
-                    <div class="form-group"><label>Weight (kg)</label><input type="number" class="item-weight" data-item="1" value="5"></div>
-                </div>
-                <div class="form-group">
-                    <label>Total Qty to Store</label>
-                    <input type="number" class="item-qty" data-item="1" value="120">
-                </div>
+            <div class="form-group">
+                <label>Internal Width (mm)</label>
+                <input type="number" id="shelf-w" value="1200" min="0">
             </div>
-            
-            <!-- Item 2 -->
-            <div class="card">
-                <h3 style="margin-top:0; color:var(--accent);">Standard Box H</h3>
-                <div class="grid grid-2">
-                    <div class="form-group"><label>Length (mm)</label><input type="number" class="item-l" data-item="2" value="208"></div>
-                    <div class="form-group"><label>Width (mm)</label><input type="number" class="item-w" data-item="2" value="273"></div>
-                    <div class="form-group"><label>Height (mm)</label><input type="number" class="item-h" data-item="2" value="297"></div>
-                    <div class="form-group"><label>Weight (kg)</label><input type="number" class="item-weight" data-item="2" value="8"></div>
-                </div>
-                <div class="form-group">
-                    <label>Total Qty to Store</label>
-                    <input type="number" class="item-qty" data-item="2" value="60">
-                </div>
+            <div class="form-group">
+                <label>Internal Depth (mm)</label>
+                <input type="number" id="shelf-d" value="600" min="0">
             </div>
-
-            <!-- Item 3 -->
-            <div class="card">
-                <h3 style="margin-top:0; color:var(--accent);">Custom Artefact</h3>
-                <div class="grid grid-2">
-                    <div class="form-group"><label>Length (mm)</label><input type="number" class="item-l" data-item="3" value="150"></div>
-                    <div class="form-group"><label>Width (mm)</label><input type="number" class="item-w" data-item="3" value="150"></div>
-                    <div class="form-group"><label>Height (mm)</label><input type="number" class="item-h" data-item="3" value="150"></div>
-                    <div class="form-group"><label>Weight (kg)</label><input type="number" class="item-weight" data-item="3" value="12"></div>
-                </div>
-                <div class="form-group">
-                    <label>Total Qty to Store</label>
-                    <input type="number" class="item-qty" data-item="3" value="25">
-                </div>
+            <div class="form-group">
+                <label>Clear Height (mm)</label>
+                <input type="number" id="shelf-h" value="400" min="0">
             </div>
         </div>
     </section>
 
-    <section>
-        <h2>3. Capacity Results</h2>
-        <div class="grid grid-3" id="results-container">
-            <!-- Results injected here via JS -->
+    <section class="card">
+        <h2>2. Add Items to Storage Plan</h2>
+        <div class="grid grid-2">
+            <div class="form-group">
+                <label>Select Box Type</label>
+                <select id="box-select">
+                    <option value="custom">-- Custom Artefact --</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Quantity to Store</label>
+                <input type="number" id="item-qty" value="1" min="1">
+            </div>
+        </div>
+
+        <!-- Custom dimensions (hidden unless "Custom Artefact" is selected) -->
+        <div id="custom-inputs" class="grid grid-3" style="display:none; margin-top:10px; padding-top:15px; border-top:1px dashed var(--border);">
+            <div class="form-group"><label>Length (mm)</label><input type="number" id="custom-l" value="100"></div>
+            <div class="form-group"><label>Width (mm)</label><input type="number" id="custom-w" value="100"></div>
+            <div class="form-group"><label>Height (mm)</label><input type="number" id="custom-h" value="100"></div>
+        </div>
+
+        <button class="btn btn-primary" id="add-btn" style="width:100%; margin-top:10px;">Add to Plan</button>
+    </section>
+
+    <section class="card">
+        <div class="table-header-row">
+            <h2 style="margin-top:0; border:none; padding:0;">3. Storage Plan Summary</h2>
+            <button class="btn btn-secondary" id="clear-btn">Clear All</button>
+        </div>
+        <p class="hint">Note: Shelves needed are calculated assuming each box type is grouped together for maximum efficiency.</p>
+        <table id="plan-table">
+            <thead>
+                <tr>
+                    <th>Item Type</th>
+                    <th>Qty</th>
+                    <th>Dimensions (mm)</th>
+                    <th>Max Fits per Shelf</th>
+                    <th>Shelves Needed</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+        <div class="summary-box">
+            <div>
+                <span class="summary-val" id="total-items">0</span>
+                <span class="summary-label">Total Items</span>
+            </div>
+            <div>
+                <span class="summary-val" id="total-shelves">0</span>
+                <span class="summary-label">Total Shelves Required</span>
+            </div>
         </div>
     </section>
 </div>
 
 <script>
-    document.addEventListener('DOMContentLoaded', () => {
-        const inputs = document.querySelectorAll('input');
-        inputs.forEach(input => {
-            input.addEventListener('input', calculate);
-        });
-        calculate();
-    });
-
-    function getShelf() {
-        return {
-            w: parseFloat(document.getElementById('shelf-w').value) || 0,
-            d: parseFloat(document.getElementById('shelf-d').value) || 0,
-            h: parseFloat(document.getElementById('shelf-h').value) || 0,
-            maxWeight: parseFloat(document.getElementById('shelf-weight').value) || 0
-        };
-    }
-
-    function getItem(index) {
-        return {
-            l: parseFloat(document.querySelector(`.item-l[data-item="${index}"]`).value) || 0,
-            w: parseFloat(document.querySelector(`.item-w[data-item="${index}"]`).value) || 0,
-            h: parseFloat(document.querySelector(`.item-h[data-item="${index}"]`).value) || 0,
-            weight: parseFloat(document.querySelector(`.item-weight[data-item="${index}"]`).value) || 0,
-            qty: parseFloat(document.querySelector(`.item-qty[data-item="${index}"]`).value) || 0
-        };
-    }
-
-    function calculate() {
-        const shelf = getShelf();
-        const resultsContainer = document.getElementById('results-container');
-        resultsContainer.innerHTML = '';
-
-        const names = ["Standard Box C", "Standard Box H", "Custom Artefact"];
-
-        for (let i = 1; i <= 3; i++) {
-            const item = getItem(i);
-            const card = document.createElement('div');
-            card.className = 'card';
-            
-            if (item.l === 0 || item.w === 0 || item.h === 0) {
-                card.innerHTML = `<h3 style="margin-top:0">${names[i-1]}</h3><p style="color:var(--text-muted)">Enter dimensions to calculate.</p>`;
-                resultsContainer.appendChild(card);
-                continue;
-            }
-
-            // Orientation 1 (Length along Width, Width along Depth)
-            let cols1 = Math.floor(shelf.w / item.l);
-            let rows1 = Math.floor(shelf.d / item.w);
-            let count1 = cols1 * rows1;
-
-            // Orientation 2 (Width along Width, Length along Depth)
-            let cols2 = Math.floor(shelf.w / item.w);
-            let rows2 = Math.floor(shelf.d / item.l);
-            let count2 = cols2 * rows2;
-
-            let itemsPerLayer = Math.max(count1, count2);
-            let layers = Math.floor(shelf.h / item.h);
-            
-            let totalByVolume = itemsPerLayer * layers;
-            
-            // Weight calculation (Infinity if no weight limits defined)
-            let totalByWeight = (shelf.maxWeight > 0 && item.weight > 0) ? Math.floor(shelf.maxWeight / item.weight) : Infinity;
-            
-            let actualMax = Math.min(totalByVolume, totalByWeight);
-            let weightLimited = totalByWeight < totalByVolume;
-            
-            let shelvesNeeded = (item.qty > 0 && actualMax > 0) ? Math.ceil(item.qty / actualMax) : 0;
-
-            let html = `
-                <h3 style="margin-top:0; color:var(--primary);">${names[i-1]}</h3>
-                <div class="metric">
-                    <span class="metric-label">Items per layer</span>
-                    <span class="metric-value">${itemsPerLayer}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Vertical layers possible</span>
-                    <span class="metric-value">${layers}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Max items (by space)</span>
-                    <span class="metric-value">${totalByVolume}</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Max items (by weight)</span>
-                    <span class="metric-value">${totalByWeight === Infinity ? 'N/A' : totalByWeight}</span>
-                </div>
-                <div class="metric" style="border-top: 2px solid var(--primary); padding-top: 10px; margin-top: 10px;">
-                    <span class="metric-label" style="font-weight:bold; color:var(--primary);">ACTUAL MAX PER SHELF</span>
-                    <span class="highlight-val">${actualMax}</span>
-                </div>
-            `;
-
-            if (weightLimited && actualMax > 0) {
-                html += `<div class="alert alert-warning">⚠️ <strong>Weight Limited:</strong> You will hit the ${shelf.maxWeight}kg limit before the shelf is physically full.</div>`;
-            } else if (actualMax === totalByVolume && totalByVolume > 0) {
-                html += `<div class="alert alert-info">✅ <strong>Volume Limited:</strong> Space runs out before the weight limit is reached.</div>`;
-            }
-
-            if (item.qty > 0 && actualMax > 0) {
-                html += `<div class="alert alert-info">📦 To store your target quantity of <strong>${item.qty}</strong>, you need <strong>${shelvesNeeded} shelves</strong> (or layers).</div>`;
-            } else if (item.qty > 0 && actualMax === 0) {
-                 html += `<div class="alert alert-warning">⚠️ Item is too large or heavy for this shelf configuration.</div>`;
-            }
-
-            card.innerHTML = html;
-            resultsContainer.appendChild(card);
-        }
-    }
-</script>
-
-</body>
-</html>
+    // --- YOUR MUSEUM'S STANDARD BOXES (mm) ---
+    const standardBoxes = [
+        { name: "Box C",  l: 430, w: 280, h: 92  },
+        { name: "Box D",  l: 435, w: 285, h: 187 },
+        { name
