@@ -38,13 +38,14 @@
     .btn-nav { background: var(--primary); color: white; padding: 6px 14px; }
 
     table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
+    th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); font-size: 0.95rem; vertical-align: middle; }
     th { background: var(--bg); font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); }
     .chip { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
 
     #overview-table tbody tr { cursor: pointer; }
     #overview-table tbody tr:hover { background: var(--info-bg); }
     #overview-table tbody tr.active-row { background: var(--info-bg); box-shadow: inset 3px 0 0 var(--accent); }
+    .thumb-svg { background: #eef2f5; border: 1px solid var(--border); border-radius: 3px; display: block; }
 
     .summary-box { margin-top: 15px; padding: 15px; background: var(--info-bg); border: 1px solid #bce8f1; border-radius: 6px; display: flex; justify-content: space-around; text-align: center; }
     .summary-val { font-size: 2rem; font-weight: bold; color: var(--primary); display: block; }
@@ -189,10 +190,10 @@
     <div class="card">
         <h2>6. Shelf Loading Overview</h2>
         <table id="overview-table">
-            <thead><tr><th>Shelf</th><th>Contents</th><th>Items</th><th>Tiers</th><th>Fill</th></tr></thead>
+            <thead><tr><th>Shelf</th><th>Side View</th><th>Contents</th><th>Items</th><th>Tiers</th><th>Fill</th></tr></thead>
             <tbody></tbody>
         </table>
-        <p class="hint">Click a row to view that shelf in 3D.</p>
+        <p class="hint">Click a row to view that shelf in 3D. Thumbnails show the shelf from the side (width &times; height).</p>
     </div>
 </div>
 
@@ -226,7 +227,7 @@ const LS_PRESETS  = 'msp-presets';
 let storagePlan = [];
 let packResult = { shelves: [], tooBig: [] };
 let viewShelf = 0;
-let pendingManual = null; // manual placements to seed next recalc
+let pendingManual = null;
 
 // ================= THREE.JS SETUP =================
 let scene, camera, renderer, itemsGroup, shelfGroup, raycaster, pointerNDC;
@@ -234,8 +235,7 @@ let meshes = [];
 let theta = Math.PI / 4, phi = Math.PI / 3.2, dist = 3000;
 const target = new THREE.Vector3();
 
-// drag / selection state
-let dragMode = null;           // 'camera' | 'box'
+let dragMode = null;
 let dragMesh = null, dragOrig = null, dragCand = null, dragValid = false, dragY = 0;
 const dragPlane = new THREE.Plane();
 const dragPoint = new THREE.Vector3();
@@ -352,7 +352,6 @@ function select(mesh) {
     if (mesh) mesh.material.emissive.setHex(SEL_EMISSIVE);
 }
 
-// Where would a box dropped at (x,z) land, and is it legal?
 function computeDrop(p, x, z) {
     const shelf = getShelf();
     const placements = packResult.shelves[viewShelf] || [];
@@ -392,7 +391,7 @@ function rotateSelected() {
         select(m || null);
         updateStats(); updateOverview(); highlightOverview(); autosave();
     } else {
-        p.l = orig.l; p.w = orig.w; // rotation not legal here
+        p.l = orig.l; p.w = orig.w;
     }
 }
 
@@ -486,7 +485,7 @@ function buildScene() {
     updateCamera();
 }
 
-// ================= PACKING: SUPPORT SURFACES + FIXED MANUAL ITEMS =================
+// ================= PACKING =================
 function fitsEmpty(shelf, u) {
     const fp = (u.l <= shelf.w && u.w <= shelf.d) || (u.w <= shelf.w && u.l <= shelf.d);
     return fp && u.h <= shelf.h;
@@ -562,7 +561,6 @@ function packShelf(shelf, units, single, fixed) {
     const supports = [makeSupport(0, 0, shelf.w, shelf.d, 0, single)];
     const E = 1;
 
-    // seed manually-placed (fixed) boxes first, lowest first
     const demoted = [];
     const sortedFixed = [...(fixed || [])].sort((a, b) => a.y - b.y);
     for (const f of sortedFixed) {
@@ -585,7 +583,6 @@ function packShelf(shelf, units, single, fixed) {
         supports.push(makeSupport(f.x, f.z, f.l, f.w, f.y + f.h, single));
     }
 
-    // then auto-pack the rest around them
     const sorted = [...demoted, ...units].sort((a, b) => (b.l * b.w - a.l * a.w) || (b.h - a.h));
     for (const u of sorted) {
         let best = null;
@@ -638,7 +635,6 @@ function recalcAll() {
     const need = {};
     storagePlan.forEach(it => need[it.name] = (need[it.name] || 0) + it.qty);
 
-    // keep manual placements only for items still in the plan
     const usedCount = {}, fixedUse = [];
     fixed.forEach(f => {
         if ((usedCount[f.name] || 0) < (need[f.name] || 0) && fitsEmpty(shelf, f)) {
@@ -674,7 +670,7 @@ function recalcAll() {
     autosave();
 }
 
-// ================= PERSISTENCE (3a) =================
+// ================= PERSISTENCE =================
 function num(v, dflt) { const n = parseFloat(v); return isFinite(n) ? n : dflt; }
 
 function currentState() {
@@ -746,6 +742,20 @@ function refreshPresetSelect() {
     });
 }
 
+// ================= SIDE-VIEW THUMBNAILS =================
+function sideViewSVG(placements, shelf) {
+    const W = Math.max(1, shelf.w), H = Math.max(1, shelf.h);
+    const sw = Math.max(W, H) / 150; // stroke scale
+    let rects = '';
+    placements.forEach(p => {
+        const ySvg = H - (p.y + p.h); // flip: floor at bottom
+        rects += `<rect x="${p.x}" y="${ySvg}" width="${p.l}" height="${p.h}" fill="${getColor(p.name)}" stroke="#ffffff" stroke-width="${sw}" opacity="0.95"></rect>`;
+    });
+    return `<svg class="thumb-svg" width="180" height="72" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
+        `<rect x="${sw/2}" y="${sw/2}" width="${W-sw}" height="${H-sw}" fill="none" stroke="#34495e" stroke-width="${sw}"></rect>` +
+        rects + `</svg>`;
+}
+
 // ================= UI / STATE =================
 function getShelf() {
     return {
@@ -805,7 +815,7 @@ function updateOverview() {
     tbody.innerHTML = '';
     const shelf = getShelf();
     if (!packResult.shelves.length) {
-        tbody.innerHTML = '<tr style="cursor:default;"><td colspan="5" style="text-align:center; color:var(--text-muted);">No items in plan yet.</td></tr>';
+        tbody.innerHTML = '<tr style="cursor:default;"><td colspan="6" style="text-align:center; color:var(--text-muted);">No items in plan yet.</td></tr>';
         return;
     }
     packResult.shelves.forEach((placements, i) => {
@@ -816,7 +826,7 @@ function updateOverview() {
         const util = shelf.w * shelf.d * shelf.h > 0 ? Math.round(vol / (shelf.w * shelf.d * shelf.h) * 100) : 0;
         const tiers = new Set(placements.map(p => p.y)).size;
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td><strong>Shelf ${i + 1}</strong></td><td>${summary}</td><td>${placements.length}</td><td>${tiers}</td><td>${util}%</td>`;
+        tr.innerHTML = `<td><strong>Shelf ${i + 1}</strong></td><td>${sideViewSVG(placements, shelf)}</td><td>${summary}</td><td>${placements.length}</td><td>${tiers}</td><td>${util}%</td>`;
         tr.addEventListener('click', () => { viewShelf = i; syncView(); });
         tbody.appendChild(tr);
     });
@@ -888,7 +898,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('single-toggle').addEventListener('change', recalcAll);
     document.querySelectorAll('#shelf-w, #shelf-d, #shelf-h').forEach(i => i.addEventListener('input', recalcAll));
 
-    // ----- 3b: manual editing -----
     document.getElementById('rotate-btn').addEventListener('click', rotateSelected);
     document.getElementById('repack-btn').addEventListener('click', () => { pendingManual = []; recalcAll(); });
     document.addEventListener('keydown', e => {
@@ -897,7 +906,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'r' || e.key === 'R') rotateSelected();
     });
 
-    // ----- Plans (3a) -----
     document.getElementById('plan-name').addEventListener('input', autosave);
 
     document.getElementById('plan-save').addEventListener('click', () => {
@@ -958,7 +966,6 @@ document.addEventListener('DOMContentLoaded', () => {
         e.target.value = '';
     });
 
-    // ----- Shelf presets (3a) -----
     document.getElementById('preset-select').addEventListener('change', e => {
         const p = allPresets().find(p => p.name === e.target.value);
         if (p) {
@@ -980,7 +987,6 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshPresetSelect();
     });
 
-    // ----- Init -----
     init3D();
     refreshPlanList();
     refreshPresetSelect();
