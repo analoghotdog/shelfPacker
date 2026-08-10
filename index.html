@@ -178,7 +178,7 @@
                 <span>Items on this shelf: <strong id="stat-items">0</strong></span>
                 <span>Tiers used: <strong id="stat-levels">0</strong></span>
             </div>
-            <p class="hint">Drag to rotate &bull; Scroll to zoom &bull; Hover a box for details. Boxes fill the floor first and only stack when floor space runs out; anything stacked is fully supported by an equal or larger footprint below.</p>
+            <p class="hint">Drag to rotate &bull; Scroll to zoom &bull; Hover a box for details. Boxes spread across the lowest free surfaces first (floor, then box tops) and only stack higher when every lower surface is full; anything stacked is fully supported.</p>
         </div>
     </div>
 
@@ -209,7 +209,6 @@ const standardBoxes = [
 const palette = ['#2980b9','#27ae60','#e67e22','#8e44ad','#c0392b','#16a085','#d35400','#f39c12','#7f8c8d','#9b59b6','#2c3e50','#1abc9c'];
 const colorMap = {};
 
-// Built-in shelf presets (user-saved ones override these by name)
 const builtinPresets = [
     { name: 'Panel shelving',     w: 900,  d: 450,  h: 350  },
     { name: 'Longspan bay',       w: 1800, d: 600,  h: 500  },
@@ -351,103 +350,95 @@ function buildScene() {
     updateCamera();
 }
 
-// ================= PACKING: FLOOR-FIRST, SUPPORT-BASED STACKING =================
+// ================= PACKING: SUPPORT SURFACES, LOWEST FIRST =================
+// The floor and every placed box top is a "support surface" with free space.
+// Each new box goes to the LOWEST surface that has room (floor first, then
+// box tops), spreading side-by-side across a surface before any second tier
+// begins. A box is always fully contained within the single surface below it
+// (no overhangs, no see-saws).
 function fitsEmpty(shelf, u) {
     const fp = (u.l <= shelf.w && u.w <= shelf.d) || (u.w <= shelf.w && u.l <= shelf.d);
     return fp && u.h <= shelf.h;
 }
 
+function makeSupport(x, z, l, w, y, single) {
+    return single
+        ? { x, z, l, w, y, gaps: [{ x: 0, w: l }] }
+        : { x, z, l, w, y, spaces: [{ x: 0, z: 0, w: l, d: w }] };
+}
+
+function findSpotDeep(sup, u) {
+    let best = null;
+    for (let i = 0; i < sup.spaces.length; i++) {
+        const s = sup.spaces[i];
+        for (const [L, W] of [[u.l, u.w], [u.w, u.l]]) {
+            if (L <= s.w && W <= s.d) {
+                const tiles = Math.floor(s.w / L) * Math.floor(s.d / W);
+                const waste = (s.w - L) + (s.d - W);
+                if (!best || tiles > best.tiles || (tiles === best.tiles && waste < best.waste)) {
+                    best = { i, sx: s.x, sz: s.z, L, W, tiles, waste };
+                }
+            }
+        }
+    }
+    return best;
+}
+
+function findSpotSingle(sup, u) {
+    const opts = [];
+    if (u.w <= sup.w) opts.push({ L: u.l, W: u.w });
+    if (u.l <= sup.w) opts.push({ L: u.w, W: u.l });
+    opts.forEach(o => o.tiles = Math.floor(sup.l / o.L));
+    let best = null;
+    for (const o of opts) for (let gi = 0; gi < sup.gaps.length; gi++) {
+        const g = sup.gaps[gi];
+        if (g.w >= o.L) {
+            const waste = g.w - o.L;
+            if (!best || o.tiles > best.tiles || (o.tiles === best.tiles && waste < best.waste)) {
+                best = { gi, sx: g.x, sz: 0, L: o.L, W: o.W, tiles: o.tiles, waste };
+            }
+        }
+    }
+    return best;
+}
+
 function packShelf(shelf, units, single) {
     const sorted = [...units].sort((a, b) => (b.l * b.w - a.l * a.w) || (b.h - a.h));
-    const columns = [];
-    const spaces = single ? null : [{ x: 0, z: 0, w: shelf.w, d: shelf.d }];
-    const gaps = single ? [{ x: 0, w: shelf.w }] : null;
     const placements = [], unplaced = [];
+    const supports = [makeSupport(0, 0, shelf.w, shelf.d, 0, single)];
 
     for (const u of sorted) {
-        let floorSpot = null;
+        let best = null; // { sup, spot }
+        for (const sup of supports) {
+            if (sup.y + u.h > shelf.h) continue;
+            const spot = single ? findSpotSingle(sup, u) : findSpotDeep(sup, u);
+            if (!spot) continue;
+            if (!best || sup.y < best.sup.y ||
+                (sup.y === best.sup.y && (spot.tiles > best.spot.tiles ||
+                 (spot.tiles === best.spot.tiles && spot.waste < best.spot.waste)))) {
+                best = { sup, spot };
+            }
+        }
+        if (!best) { unplaced.push(u); continue; }
+
+        const sup = best.sup, spot = best.spot;
+        const p = { x: sup.x + spot.sx, z: sup.z + spot.sz, y: sup.y, l: spot.L, w: spot.W, h: u.h, name: u.name };
+        placements.push(p);
+
         if (single) {
-            const opts = [];
-            if (u.w <= shelf.d) opts.push({ L: u.l, W: u.w });
-            if (u.l <= shelf.d) opts.push({ L: u.w, W: u.l });
-            opts.forEach(o => o.tiles = Math.floor(shelf.w / o.L));
-            opts.sort((a, b) => b.tiles - a.tiles || a.L - b.L);
-            let best = null;
-            for (const o of opts) for (let gi = 0; gi < gaps.length; gi++) {
-                if (gaps[gi].w >= o.L) {
-                    const left = gaps[gi].w - o.L;
-                    if (!best || left < best.left) best = { gi, o, left };
-                }
-            }
-            if (best && u.h <= shelf.h) floorSpot = { type: 'single', ...best };
+            const g = sup.gaps[spot.gi];
+            const rest = g.w - spot.L;
+            sup.gaps.splice(spot.gi, 1, ...(rest >= 50 ? [{ x: g.x + spot.L, w: rest }] : []));
         } else {
-            let best = null;
-            for (let i = 0; i < spaces.length; i++) {
-                const s = spaces[i];
-                for (const [L, W] of [[u.l, u.w], [u.w, u.l]]) {
-                    if (L <= s.w && W <= s.d) {
-                        const tiles = Math.floor(s.w / L) * Math.floor(s.d / W);
-                        const waste = (s.w - L) + (s.d - W);
-                        const depthWaste = s.d - W;
-                        if (!best || tiles > best.tiles ||
-                            (tiles === best.tiles && waste < best.waste) ||
-                            (tiles === best.tiles && waste === best.waste && depthWaste < best.depthWaste)) {
-                            best = { i, L, W, tiles, waste, depthWaste };
-                        }
-                    }
-                }
-            }
-            if (best && u.h <= shelf.h) floorSpot = { type: 'deep', ...best };
+            const s = sup.spaces[spot.i];
+            const ns = [];
+            if (s.w - spot.L >= 50) ns.push({ x: s.x + spot.L, z: s.z, w: s.w - spot.L, d: s.d });
+            if (s.d - spot.W >= 50) ns.push({ x: s.x, z: s.z + spot.W, w: spot.L, d: s.d - spot.W });
+            sup.spaces.splice(spot.i, 1, ...ns);
         }
 
-        let bestCol = null;
-        if (!floorSpot) {
-            for (const col of columns) {
-                const top = col.stack[col.stack.length - 1];
-                let fit = null;
-                if (u.l <= top.l && u.w <= top.w) fit = { L: u.l, W: u.w };
-                else if (u.w <= top.l && u.l <= top.w) fit = { L: u.w, W: u.l };
-                if (!fit || col.topY + u.h > shelf.h) continue;
-                const leftover = (top.l - fit.L) + (top.w - fit.W);
-                if (!bestCol || leftover < bestCol.leftover ||
-                    (leftover === bestCol.leftover && col.topY < bestCol.topY)) {
-                    bestCol = { col, fit, leftover, topY: col.topY };
-                }
-            }
-        }
-
-        if (floorSpot) {
-            let x, z, L, W;
-            if (floorSpot.type === 'single') {
-                const g = gaps[floorSpot.gi];
-                x = g.x; z = 0; L = floorSpot.o.L; W = floorSpot.o.W;
-                const rest = g.w - L;
-                gaps.splice(floorSpot.gi, 1, ...(rest >= 50 ? [{ x: g.x + L, w: rest }] : []));
-            } else {
-                const s = spaces[floorSpot.i];
-                x = s.x; z = s.z; L = floorSpot.L; W = floorSpot.W;
-                const ns = [];
-                if (s.w - L >= 50) ns.push({ x: s.x + L, z: s.z, w: s.w - L, d: s.d });
-                if (s.d - W >= 50) ns.push({ x: s.x, z: s.z + W, w: L, d: s.d - W });
-                spaces.splice(floorSpot.i, 1, ...ns);
-            }
-            const p = { x, z, y: 0, l: L, w: W, h: u.h, name: u.name };
-            placements.push(p);
-            columns.push({ topY: u.h, stack: [{ x, z, l: L, w: W }] });
-        } else if (bestCol) {
-            const top = bestCol.col.stack[bestCol.col.stack.length - 1];
-            const p = {
-                x: top.x + (top.l - bestCol.fit.L) / 2,
-                z: top.z + (top.w - bestCol.fit.W) / 2,
-                y: bestCol.col.topY,
-                l: bestCol.fit.L, w: bestCol.fit.W, h: u.h, name: u.name
-            };
-            placements.push(p);
-            bestCol.col.stack.push({ x: p.x, z: p.z, l: p.l, w: p.w });
-            bestCol.col.topY += u.h;
-        } else {
-            unplaced.push(u);
-        }
+        // the new box's top becomes a support surface in turn
+        supports.push(makeSupport(p.x, p.z, p.l, p.w, p.y + u.h, single));
     }
     return { placements, unplaced };
 }
@@ -520,7 +511,7 @@ function setUserPresets(p) { try { localStorage.setItem(LS_PRESETS, JSON.stringi
 function allPresets() {
     const map = new Map();
     builtinPresets.forEach(p => map.set(p.name, p));
-    getUserPresets().forEach(p => map.set(p.name, p)); // user presets override built-ins by name
+    getUserPresets().forEach(p => map.set(p.name, p));
     return [...map.values()];
 }
 function refreshPresetSelect() {
@@ -590,192 +581,4 @@ function updateSummary() {
     const tb = document.getElementById('toobig-box');
     if (packResult.tooBig.length) {
         const counts = {};
-        packResult.tooBig.forEach(u => counts[u.name] = (counts[u.name] || 0) + 1);
-        tb.style.display = 'block';
-        tb.innerHTML = '<strong>Too large for this shelf spec:</strong> ' +
-            Object.entries(counts).map(([n, c]) => `${c} × ${n}`).join(', ') +
-            '. Try a larger bay or racking.';
-    } else tb.style.display = 'none';
-}
-
-function updateOverview() {
-    const tbody = document.querySelector('#overview-table tbody');
-    tbody.innerHTML = '';
-    const shelf = getShelf();
-    if (!packResult.shelves.length) {
-        tbody.innerHTML = '<tr style="cursor:default;"><td colspan="5" style="text-align:center; color:var(--text-muted);">No items in plan yet.</td></tr>';
-        return;
-    }
-    packResult.shelves.forEach((placements, i) => {
-        const counts = {};
-        placements.forEach(p => counts[p.name] = (counts[p.name] || 0) + 1);
-        const summary = Object.entries(counts).map(([n, c]) => `${c} × ${n}`).join(', ');
-        const vol = placements.reduce((s, p) => s + p.l * p.w * p.h, 0);
-        const util = shelf.w * shelf.d * shelf.h > 0 ? Math.round(vol / (shelf.w * shelf.d * shelf.h) * 100) : 0;
-        const tiers = new Set(placements.map(p => p.y)).size;
-        const tr = document.createElement('tr');
-        tr.innerHTML = `<td><strong>Shelf ${i + 1}</strong></td><td>${summary}</td><td>${placements.length}</td><td>${tiers}</td><td>${util}%</td>`;
-        tr.addEventListener('click', () => { viewShelf = i; syncView(); });
-        tbody.appendChild(tr);
-    });
-}
-
-function highlightOverview() {
-    if (!packResult.shelves.length) return;
-    document.querySelectorAll('#overview-table tbody tr').forEach((tr, i) => {
-        tr.classList.toggle('active-row', i === viewShelf);
-    });
-}
-
-function updateStats() {
-    const shelf = getShelf();
-    const placements = packResult.shelves[viewShelf] || [];
-    const vol = placements.reduce((s, p) => s + p.l * p.w * p.h, 0);
-    const util = shelf.w * shelf.d * shelf.h > 0 ? Math.round(vol / (shelf.w * shelf.d * shelf.h) * 100) : 0;
-    document.getElementById('stat-util').innerText = util + '%';
-    document.getElementById('stat-items').innerText = placements.length;
-    document.getElementById('stat-levels').innerText = new Set(placements.map(p => p.y)).size;
-}
-
-function syncCustomVisibility() {
-    document.getElementById('custom-inputs').style.display =
-        document.getElementById('box-select').value === 'custom' ? 'grid' : 'none';
-}
-
-// ================= EVENTS =================
-document.addEventListener('DOMContentLoaded', () => {
-    const boxSelect = document.getElementById('box-select');
-
-    standardBoxes.forEach(box => {
-        const opt = document.createElement('option');
-        opt.value = box.name;
-        opt.textContent = `${box.name} (${box.l} × ${box.w} × ${box.h} mm)`;
-        boxSelect.appendChild(opt);
-    });
-    const customOpt = document.createElement('option');
-    customOpt.value = 'custom';
-    customOpt.textContent = '-- Custom Artefact --';
-    boxSelect.appendChild(customOpt);
-
-    boxSelect.addEventListener('change', syncCustomVisibility);
-    syncCustomVisibility();
-
-    document.getElementById('add-btn').addEventListener('click', () => {
-        const qty = parseInt(document.getElementById('item-qty').value) || 0;
-        if (qty <= 0) { alert('Please enter a quantity of at least 1.'); return; }
-        let item;
-        if (boxSelect.value === 'custom') {
-            const l = parseFloat(document.getElementById('custom-l').value) || 0;
-            const w = parseFloat(document.getElementById('custom-w').value) || 0;
-            const h = parseFloat(document.getElementById('custom-h').value) || 0;
-            if (l <= 0 || w <= 0 || h <= 0) { alert('Please enter valid custom dimensions.'); return; }
-            const label = document.getElementById('custom-name').value.trim() || 'Custom Artefact';
-            item = { name: label, l, w, h, qty };
-        } else {
-            const b = standardBoxes.find(b => b.name === boxSelect.value);
-            item = { ...b, qty };
-        }
-        storagePlan.push(item);
-        document.getElementById('item-qty').value = 1;
-        recalcAll();
-    });
-
-    document.getElementById('clear-btn').addEventListener('click', () => { storagePlan = []; recalcAll(); });
-    document.getElementById('prev-shelf').addEventListener('click', () => { viewShelf--; syncView(); });
-    document.getElementById('next-shelf').addEventListener('click', () => { viewShelf++; syncView(); });
-    document.getElementById('single-toggle').addEventListener('change', recalcAll);
-    document.querySelectorAll('#shelf-w, #shelf-d, #shelf-h').forEach(i => i.addEventListener('input', recalcAll));
-
-    // ----- Plans (3a) -----
-    document.getElementById('plan-name').addEventListener('input', autosave);
-
-    document.getElementById('plan-save').addEventListener('click', () => {
-        const name = document.getElementById('plan-name').value.trim() || 'Untitled plan';
-        const plans = getPlans();
-        plans[name] = currentState();
-        setPlans(plans);
-        refreshPlanList();
-        autosave();
-    });
-
-    document.getElementById('plan-open-btn').addEventListener('click', () => {
-        const name = document.getElementById('plan-open').value;
-        if (!name) return;
-        const plans = getPlans();
-        if (plans[name]) applyState(plans[name]);
-    });
-
-    document.getElementById('plan-delete').addEventListener('click', () => {
-        const name = document.getElementById('plan-open').value;
-        if (!name) return;
-        if (!confirm(`Delete saved plan "${name}"? This cannot be undone.`)) return;
-        const plans = getPlans();
-        delete plans[name];
-        setPlans(plans);
-        refreshPlanList();
-    });
-
-    document.getElementById('plan-new').addEventListener('click', () => {
-        if (storagePlan.length && !confirm('Start a new plan? Current unsaved changes will be lost.')) return;
-        storagePlan = [];
-        document.getElementById('plan-name').value = 'Untitled plan';
-        recalcAll();
-    });
-
-    document.getElementById('file-export').addEventListener('click', () => {
-        const data = currentState();
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = (data.name || 'plan').replace(/[^\w\-]+/g, '_') + '.json';
-        a.click();
-        URL.revokeObjectURL(a.href);
-    });
-
-    document.getElementById('file-import-btn').addEventListener('click', () => document.getElementById('file-import').click());
-    document.getElementById('file-import').addEventListener('change', e => {
-        const f = e.target.files[0];
-        if (!f) return;
-        const reader = new FileReader();
-        reader.onload = () => {
-            try {
-                if (!applyState(JSON.parse(reader.result))) alert('Could not read that plan file.');
-            } catch (err) { alert('Not a valid JSON plan file.'); }
-        };
-        reader.readAsText(f);
-        e.target.value = '';
-    });
-
-    // ----- Shelf presets (3a) -----
-    document.getElementById('preset-select').addEventListener('change', e => {
-        const p = allPresets().find(p => p.name === e.target.value);
-        if (p) {
-            document.getElementById('shelf-w').value = p.w;
-            document.getElementById('shelf-d').value = p.d;
-            document.getElementById('shelf-h').value = p.h;
-            recalcAll();
-        }
-        e.target.selectedIndex = 0;
-    });
-
-    document.getElementById('preset-save').addEventListener('click', () => {
-        const name = prompt('Preset name:', 'My shelf');
-        if (!name || !name.trim()) return;
-        const shelf = getShelf();
-        const user = getUserPresets().filter(p => p.name !== name.trim());
-        user.push({ name: name.trim(), w: shelf.w, d: shelf.d, h: shelf.h });
-        setUserPresets(user);
-        refreshPresetSelect();
-    });
-
-    // ----- Init: restore autosaved work if present -----
-    init3D();
-    refreshPlanList();
-    refreshPresetSelect();
-    let restored = null;
-    try { restored = JSON.parse(localStorage.getItem(LS_AUTOSAVE)); } catch (e) {}
-    if (restored) applyState(restored); else recalcAll();
-});
-</script>
-</body>
-</html>
+        packResult.too
