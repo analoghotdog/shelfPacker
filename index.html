@@ -86,15 +86,22 @@
         <div class="grid grid-2">
             <div class="form-group">
                 <label>Select Box Type</label>
-                <select id="box-select"><option value="custom">-- Custom Artefact --</option></select>
+                <select id="box-select"></select>
             </div>
             <div class="form-group"><label>Quantity to Store</label><input type="number" id="item-qty" value="1" min="1"></div>
         </div>
+
+        <!-- Custom item fields: shown whenever "Custom Artefact" is selected -->
         <div id="custom-inputs" class="grid grid-3" style="display:none; margin-top:10px; padding-top:15px; border-top:1px dashed var(--border);">
+            <div class="form-group" style="grid-column: 1 / -1;">
+                <label>Item Label (optional)</label>
+                <input type="text" id="custom-name" placeholder="e.g. Painting crate, Oak chest...">
+            </div>
             <div class="form-group"><label>Length (mm)</label><input type="number" id="custom-l" value="100"></div>
             <div class="form-group"><label>Width (mm)</label><input type="number" id="custom-w" value="100"></div>
             <div class="form-group"><label>Height (mm)</label><input type="number" id="custom-h" value="100"></div>
         </div>
+
         <button class="btn btn-primary" id="add-btn" style="width:100%; margin-top:10px;">Add to Plan</button>
     </div>
 
@@ -131,16 +138,16 @@
             <div class="viewer-stats">
                 <span>Fill: <strong id="stat-util">0%</strong></span>
                 <span>Items on this shelf: <strong id="stat-items">0</strong></span>
-                <span>Levels used: <strong id="stat-levels">0</strong></span>
+                <span>Tiers used: <strong id="stat-levels">0</strong></span>
             </div>
-            <p class="hint">Drag to rotate &bull; Scroll to zoom &bull; Hover a box for details. Boxes of the same colour match the plan list.</p>
+            <p class="hint">Drag to rotate &bull; Scroll to zoom &bull; Hover a box for details. Boxes fill the floor first and only stack when floor space runs out; anything stacked is fully supported by an equal or larger footprint below.</p>
         </div>
     </div>
 
     <div class="card">
         <h2>5. Shelf Loading Overview</h2>
         <table id="overview-table">
-            <thead><tr><th>Shelf</th><th>Contents</th><th>Items</th><th>Levels</th><th>Fill</th></tr></thead>
+            <thead><tr><th>Shelf</th><th>Contents</th><th>Items</th><th>Tiers</th><th>Fill</th></tr></thead>
             <tbody></tbody>
         </table>
         <p class="hint">Click a row to view that shelf in 3D.</p>
@@ -295,107 +302,106 @@ function buildScene() {
     updateCamera();
 }
 
-// ================= PACKING ALGORITHMS =================
+// ================= PACKING: FLOOR-FIRST, SUPPORT-BASED STACKING =================
 function fitsEmpty(shelf, u) {
     const fp = (u.l <= shelf.w && u.w <= shelf.d) || (u.w <= shelf.w && u.l <= shelf.d);
     return fp && u.h <= shelf.h;
 }
 
-// --- Mixed (deep) mode: 2D free-rectangle packing per level, best-fit ---
-function findDeepSpot(level, u) {
-    let best = null;
-    for (let i = 0; i < level.spaces.length; i++) {
-        const s = level.spaces[i];
-        for (const [L, W] of [[u.l, u.w], [u.w, u.l]]) {
-            if (L <= s.w && W <= s.d) {
-                const score = (s.w - L) + (s.d - W);
-                if (!best || score < best.score) best = { i, L, W, score };
+function packShelf(shelf, units, single) {
+    const sorted = [...units].sort((a, b) => (b.l * b.w - a.l * a.w) || (b.h - a.h));
+    const columns = [];
+    const spaces = single ? null : [{ x: 0, z: 0, w: shelf.w, d: shelf.d }];
+    const gaps = single ? [{ x: 0, w: shelf.w }] : null;
+    const placements = [], unplaced = [];
+
+    for (const u of sorted) {
+        // --- 1) try the floor first ---
+        let floorSpot = null;
+        if (single) {
+            const opts = [];
+            if (u.w <= shelf.d) opts.push({ L: u.l, W: u.w });
+            if (u.l <= shelf.d) opts.push({ L: u.w, W: u.l });
+            opts.forEach(o => o.tiles = Math.floor(shelf.w / o.L));
+            opts.sort((a, b) => b.tiles - a.tiles || a.L - b.L);
+            let best = null;
+            for (const o of opts) for (let gi = 0; gi < gaps.length; gi++) {
+                if (gaps[gi].w >= o.L) {
+                    const left = gaps[gi].w - o.L;
+                    if (!best || left < best.left) best = { gi, o, left };
+                }
+            }
+            if (best && u.h <= shelf.h) floorSpot = { type: 'single', ...best };
+        } else {
+            let best = null;
+            for (let i = 0; i < spaces.length; i++) {
+                const s = spaces[i];
+                for (const [L, W] of [[u.l, u.w], [u.w, u.l]]) {
+                    if (L <= s.w && W <= s.d) {
+                        const tiles = Math.floor(s.w / L) * Math.floor(s.d / W);
+                        const waste = (s.w - L) + (s.d - W);
+                        const depthWaste = s.d - W;
+                        if (!best || tiles > best.tiles ||
+                            (tiles === best.tiles && waste < best.waste) ||
+                            (tiles === best.tiles && waste === best.waste && depthWaste < best.depthWaste)) {
+                            best = { i, L, W, tiles, waste, depthWaste };
+                        }
+                    }
+                }
+            }
+            if (best && u.h <= shelf.h) floorSpot = { type: 'deep', ...best };
+        }
+
+        // --- 2) no floor space: stack on the best fully-supporting column ---
+        let bestCol = null;
+        if (!floorSpot) {
+            for (const col of columns) {
+                const top = col.stack[col.stack.length - 1];
+                let fit = null;
+                if (u.l <= top.l && u.w <= top.w) fit = { L: u.l, W: u.w };
+                else if (u.w <= top.l && u.l <= top.w) fit = { L: u.w, W: u.l };
+                if (!fit || col.topY + u.h > shelf.h) continue;
+                const leftover = (top.l - fit.L) + (top.w - fit.W);
+                if (!bestCol || leftover < bestCol.leftover ||
+                    (leftover === bestCol.leftover && col.topY < bestCol.topY)) {
+                    bestCol = { col, fit, leftover, topY: col.topY };
+                }
             }
         }
-    }
-    return best;
-}
 
-function applyDeep(level, u, spot, placements) {
-    const s = level.spaces[spot.i];
-    placements.push({ x: s.x, z: s.z, y: level.y, l: spot.L, w: spot.W, h: u.h, name: u.name });
-    const newSpaces = [];
-    if (s.w - spot.L >= 50) newSpaces.push({ x: s.x + spot.L, z: s.z, w: s.w - spot.L, d: s.d });
-    if (s.d - spot.W >= 50) newSpaces.push({ x: s.x, z: s.z + spot.W, w: spot.L, d: s.d - spot.W });
-    level.spaces.splice(spot.i, 1, ...newSpaces);
-}
-
-function packShelfDeep(shelf, units) {
-    const sorted = [...units].sort((a, b) => (b.h - a.h) || (b.l * b.w - a.l * a.w));
-    const levels = [], placements = [], unplaced = [];
-    for (const u of sorted) {
-        let bestLvl = null, bestSpot = null;
-        for (const lvl of levels) {
-            if (u.h > lvl.height) continue;
-            const spot = findDeepSpot(lvl, u);
-            if (spot && (!bestSpot || spot.score < bestSpot.score)) { bestSpot = spot; bestLvl = lvl; }
-        }
-        if (bestLvl) { applyDeep(bestLvl, u, bestSpot, placements); continue; }
-        const used = levels.reduce((s, l) => s + l.height, 0);
-        if (u.h <= shelf.h - used) {
-            const lvl = { y: used, height: u.h, spaces: [{ x: 0, z: 0, w: shelf.w, d: shelf.d }] };
-            levels.push(lvl);
-            applyDeep(lvl, u, findDeepSpot(lvl, u), placements);
-        } else unplaced.push(u);
-    }
-    return { placements, unplaced };
-}
-
-// --- Single-depth mode: one row per level, best-fit gap along the width ---
-function orientOptions(shelf, u) {
-    const opts = [];
-    if (u.w <= shelf.d) opts.push({ L: u.l, W: u.w });
-    if (u.l <= shelf.d) opts.push({ L: u.w, W: u.l });
-    opts.sort((a, b) => a.L - b.L);
-    return opts;
-}
-
-function findSingleSpot(level, u, opts) {
-    let best = null;
-    for (const o of opts) {
-        for (let gi = 0; gi < level.gaps.length; gi++) {
-            const g = level.gaps[gi];
-            if (g.w >= o.L) {
-                const leftover = g.w - o.L;
-                if (!best || leftover < best.leftover) best = { gi, o, leftover };
+        // --- 3) commit ---
+        if (floorSpot) {
+            let x, z, L, W;
+            if (floorSpot.type === 'single') {
+                const g = gaps[floorSpot.gi];
+                x = g.x; z = 0; L = floorSpot.o.L; W = floorSpot.o.W;
+                const rest = g.w - L;
+                gaps.splice(floorSpot.gi, 1, ...(rest >= 50 ? [{ x: g.x + L, w: rest }] : []));
+            } else {
+                const s = spaces[floorSpot.i];
+                x = s.x; z = s.z; L = floorSpot.L; W = floorSpot.W;
+                const ns = [];
+                if (s.w - L >= 50) ns.push({ x: s.x + L, z: s.z, w: s.w - L, d: s.d });
+                if (s.d - W >= 50) ns.push({ x: s.x, z: s.z + W, w: L, d: s.d - W });
+                spaces.splice(floorSpot.i, 1, ...ns);
             }
+            const p = { x, z, y: 0, l: L, w: W, h: u.h, name: u.name };
+            placements.push(p);
+            columns.push({ topY: u.h, stack: [{ x, z, l: L, w: W }] });
+        } else if (bestCol) {
+            const top = bestCol.col.stack[bestCol.col.stack.length - 1];
+            const p = {
+                x: top.x + (top.l - bestCol.fit.L) / 2,
+                z: top.z + (top.w - bestCol.fit.W) / 2,
+                y: bestCol.col.topY,
+                l: bestCol.fit.L, w: bestCol.fit.W, h: u.h, name: u.name
+            };
+            placements.push(p);
+            bestCol.col.stack.push({ x: p.x, z: p.z, l: p.l, w: p.w });
+            bestCol.col.topY += u.h;
+        } else {
+            unplaced.push(u);
         }
-    }
-    return best;
-}
-
-function applySingle(level, u, spot, placements) {
-    const g = level.gaps[spot.gi];
-    placements.push({ x: g.x, z: 0, y: level.y, l: spot.o.L, w: spot.o.W, h: u.h, name: u.name });
-    const rest = g.w - spot.o.L;
-    level.gaps.splice(spot.gi, 1, ...(rest >= 50 ? [{ x: g.x + spot.o.L, w: rest }] : []));
-}
-
-function packShelfSingle(shelf, units) {
-    const minL = u => { const o = orientOptions(shelf, u); return o.length ? o[0].L : Infinity; };
-    const sorted = [...units].sort((a, b) => (b.h - a.h) || (minL(b) - minL(a)));
-    const levels = [], placements = [], unplaced = [];
-    for (const u of sorted) {
-        const opts = orientOptions(shelf, u);
-        if (!opts.length) { unplaced.push(u); continue; }
-        let bestLvl = null, bestSpot = null;
-        for (const lvl of levels) {
-            if (u.h > lvl.height) continue;
-            const spot = findSingleSpot(lvl, u, opts);
-            if (spot && (!bestSpot || spot.leftover < bestSpot.leftover)) { bestSpot = spot; bestLvl = lvl; }
-        }
-        if (bestLvl) { applySingle(bestLvl, u, bestSpot, placements); continue; }
-        const used = levels.reduce((s, l) => s + l.height, 0);
-        if (u.h <= shelf.h - used) {
-            const lvl = { y: used, height: u.h, gaps: [{ x: 0, w: shelf.w }] };
-            levels.push(lvl);
-            applySingle(lvl, u, findSingleSpot(lvl, u, opts), placements);
-        } else unplaced.push(u);
     }
     return { placements, unplaced };
 }
@@ -407,7 +413,7 @@ function packAll(shelf, units, single) {
     const shelves = [];
     let remaining = packable;
     while (remaining.length && shelves.length < 99) {
-        const r = single ? packShelfSingle(shelf, remaining) : packShelfDeep(shelf, remaining);
+        const r = packShelf(shelf, remaining, single);
         shelves.push(r.placements);
         remaining = r.unplaced;
     }
@@ -492,9 +498,9 @@ function updateOverview() {
         const summary = Object.entries(counts).map(([n, c]) => `${c} × ${n}`).join(', ');
         const vol = placements.reduce((s, p) => s + p.l * p.w * p.h, 0);
         const util = shelf.w * shelf.d * shelf.h > 0 ? Math.round(vol / (shelf.w * shelf.d * shelf.h) * 100) : 0;
-        const levels = new Set(placements.map(p => p.y)).size;
+        const tiers = new Set(placements.map(p => p.y)).size;
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td><strong>Shelf ${i + 1}</strong></td><td>${summary}</td><td>${placements.length}</td><td>${levels}</td><td>${util}%</td>`;
+        tr.innerHTML = `<td><strong>Shelf ${i + 1}</strong></td><td>${summary}</td><td>${placements.length}</td><td>${tiers}</td><td>${util}%</td>`;
         tr.addEventListener('click', () => { viewShelf = i; syncView(); });
         tbody.appendChild(tr);
     });
@@ -517,19 +523,29 @@ function updateStats() {
     document.getElementById('stat-levels').innerText = new Set(placements.map(p => p.y)).size;
 }
 
+function syncCustomVisibility() {
+    document.getElementById('custom-inputs').style.display =
+        document.getElementById('box-select').value === 'custom' ? 'grid' : 'none';
+}
+
 // ================= EVENTS =================
 document.addEventListener('DOMContentLoaded', () => {
     const boxSelect = document.getElementById('box-select');
+
+    // Standard boxes first, custom option last
     standardBoxes.forEach(box => {
         const opt = document.createElement('option');
         opt.value = box.name;
         opt.textContent = `${box.name} (${box.l} × ${box.w} × ${box.h} mm)`;
         boxSelect.appendChild(opt);
     });
+    const customOpt = document.createElement('option');
+    customOpt.value = 'custom';
+    customOpt.textContent = '-- Custom Artefact --';
+    boxSelect.appendChild(customOpt);
 
-    boxSelect.addEventListener('change', () => {
-        document.getElementById('custom-inputs').style.display = boxSelect.value === 'custom' ? 'grid' : 'none';
-    });
+    boxSelect.addEventListener('change', syncCustomVisibility);
+    syncCustomVisibility(); // correct state on first load
 
     document.getElementById('add-btn').addEventListener('click', () => {
         const qty = parseInt(document.getElementById('item-qty').value) || 0;
@@ -540,7 +556,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const w = parseFloat(document.getElementById('custom-w').value) || 0;
             const h = parseFloat(document.getElementById('custom-h').value) || 0;
             if (l <= 0 || w <= 0 || h <= 0) { alert('Please enter valid custom dimensions.'); return; }
-            item = { name: 'Custom Artefact', l, w, h, qty };
+            const label = document.getElementById('custom-name').value.trim() || 'Custom Artefact';
+            item = { name: label, l, w, h, qty };
         } else {
             const b = standardBoxes.find(b => b.name === boxSelect.value);
             item = { ...b, qty };
