@@ -42,6 +42,10 @@
     th { background: var(--bg); font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); }
     .chip { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 8px; vertical-align: middle; }
 
+    #overview-table tbody tr { cursor: pointer; }
+    #overview-table tbody tr:hover { background: var(--info-bg); }
+    #overview-table tbody tr.active-row { background: var(--info-bg); box-shadow: inset 3px 0 0 var(--accent); }
+
     .summary-box { margin-top: 15px; padding: 15px; background: var(--info-bg); border: 1px solid #bce8f1; border-radius: 6px; display: flex; justify-content: space-around; text-align: center; }
     .summary-val { font-size: 2rem; font-weight: bold; color: var(--primary); display: block; }
     .summary-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
@@ -71,6 +75,10 @@
             <div class="form-group"><label>Internal Depth (mm)</label><input type="number" id="shelf-d" value="600" min="0"></div>
             <div class="form-group"><label>Clear Height (mm)</label><input type="number" id="shelf-h" value="400" min="0"></div>
         </div>
+        <label style="display:flex; align-items:center; gap:10px; text-transform:none; font-size:0.9rem; font-weight:600; color:var(--text); margin:0;">
+            <input type="checkbox" id="single-toggle" style="width:auto; margin:0;">
+            Single-depth rows only (never place boxes behind boxes)
+        </label>
     </div>
 
     <div class="card">
@@ -128,6 +136,15 @@
             <p class="hint">Drag to rotate &bull; Scroll to zoom &bull; Hover a box for details. Boxes of the same colour match the plan list.</p>
         </div>
     </div>
+
+    <div class="card">
+        <h2>5. Shelf Loading Overview</h2>
+        <table id="overview-table">
+            <thead><tr><th>Shelf</th><th>Contents</th><th>Items</th><th>Levels</th><th>Fill</th></tr></thead>
+            <tbody></tbody>
+        </table>
+        <p class="hint">Click a row to view that shelf in 3D.</p>
+    </div>
 </div>
 
 <script>
@@ -175,7 +192,7 @@ function init3D() {
     const canvas = renderer.domElement;
     let dragging = false, lx = 0, ly = 0;
     canvas.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); });
-    canvas.addEventListener('pointerup', e => { dragging = false; });
+    canvas.addEventListener('pointerup', () => { dragging = false; });
     canvas.addEventListener('pointermove', e => {
         if (dragging) {
             theta -= (e.clientX - lx) * 0.006;
@@ -231,7 +248,6 @@ function getColor(name) {
 
 function buildScene() {
     const shelf = getShelf();
-    // clear old objects
     [shelfGroup, itemsGroup].forEach(g => {
         while (g.children.length) {
             const c = g.children.pop();
@@ -242,14 +258,12 @@ function buildScene() {
     meshes = [];
 
     if (shelf.w > 0 && shelf.d > 0 && shelf.h > 0) {
-        // shelf outline
         const edges = new THREE.LineSegments(
             new THREE.EdgesGeometry(new THREE.BoxGeometry(shelf.w, shelf.h, shelf.d)),
             new THREE.LineBasicMaterial({ color: 0x34495e })
         );
         edges.position.set(shelf.w / 2, shelf.h / 2, shelf.d / 2);
         shelfGroup.add(edges);
-        // floor
         const floor = new THREE.Mesh(
             new THREE.PlaneGeometry(shelf.w, shelf.d),
             new THREE.MeshLambertMaterial({ color: 0xdfe6ed })
@@ -258,7 +272,6 @@ function buildScene() {
         floor.position.set(shelf.w / 2, 0, shelf.d / 2);
         shelfGroup.add(floor);
 
-        // placed items on currently viewed shelf
         const placements = packResult.shelves[viewShelf] || [];
         placements.forEach(p => {
             const gap = 4;
@@ -268,11 +281,10 @@ function buildScene() {
             );
             mesh.position.set(p.x + p.l / 2, p.y + p.h / 2, p.z + p.w / 2);
             mesh.userData = p;
-            const outline = new THREE.LineSegments(
+            mesh.add(new THREE.LineSegments(
                 new THREE.EdgesGeometry(mesh.geometry),
                 new THREE.LineBasicMaterial({ color: 0xffffff })
-            );
-            mesh.add(outline);
+            ));
             itemsGroup.add(mesh);
             meshes.push(mesh);
         });
@@ -283,64 +295,119 @@ function buildScene() {
     updateCamera();
 }
 
-// ================= PACKING ALGORITHM =================
+// ================= PACKING ALGORITHMS =================
 function fitsEmpty(shelf, u) {
     const fp = (u.l <= shelf.w && u.w <= shelf.d) || (u.w <= shelf.w && u.l <= shelf.d);
     return fp && u.h <= shelf.h;
 }
 
-function tryPlace(level, u, placements) {
+// --- Mixed (deep) mode: 2D free-rectangle packing per level, best-fit ---
+function findDeepSpot(level, u) {
     let best = null;
     for (let i = 0; i < level.spaces.length; i++) {
         const s = level.spaces[i];
-        const orients = [[u.l, u.w], [u.w, u.l]];
-        for (const [L, W] of orients) {
+        for (const [L, W] of [[u.l, u.w], [u.w, u.l]]) {
             if (L <= s.w && W <= s.d) {
                 const score = (s.w - L) + (s.d - W);
                 if (!best || score < best.score) best = { i, L, W, score };
             }
         }
     }
-    if (!best) return false;
-    const s = level.spaces[best.i];
-    placements.push({ x: s.x, z: s.z, y: level.y, l: best.L, w: best.W, h: u.h, name: u.name });
-    const newSpaces = [];
-    if (s.w - best.L >= 50) newSpaces.push({ x: s.x + best.L, z: s.z, w: s.w - best.L, d: s.d });
-    if (s.d - best.W >= 50) newSpaces.push({ x: s.x, z: s.z + best.W, w: best.L, d: s.d - best.W });
-    level.spaces.splice(best.i, 1, ...newSpaces);
-    return true;
+    return best;
 }
 
-function packShelf(shelf, units) {
+function applyDeep(level, u, spot, placements) {
+    const s = level.spaces[spot.i];
+    placements.push({ x: s.x, z: s.z, y: level.y, l: spot.L, w: spot.W, h: u.h, name: u.name });
+    const newSpaces = [];
+    if (s.w - spot.L >= 50) newSpaces.push({ x: s.x + spot.L, z: s.z, w: s.w - spot.L, d: s.d });
+    if (s.d - spot.W >= 50) newSpaces.push({ x: s.x, z: s.z + spot.W, w: spot.L, d: s.d - spot.W });
+    level.spaces.splice(spot.i, 1, ...newSpaces);
+}
+
+function packShelfDeep(shelf, units) {
     const sorted = [...units].sort((a, b) => (b.h - a.h) || (b.l * b.w - a.l * a.w));
     const levels = [], placements = [], unplaced = [];
     for (const u of sorted) {
-        let done = false;
+        let bestLvl = null, bestSpot = null;
         for (const lvl of levels) {
-            if (u.h <= lvl.height && tryPlace(lvl, u, placements)) { done = true; break; }
+            if (u.h > lvl.height) continue;
+            const spot = findDeepSpot(lvl, u);
+            if (spot && (!bestSpot || spot.score < bestSpot.score)) { bestSpot = spot; bestLvl = lvl; }
         }
-        if (!done) {
-            const used = levels.reduce((s, l) => s + l.height, 0);
-            if (u.h <= shelf.h - used) {
-                const lvl = { y: used, height: u.h, spaces: [{ x: 0, z: 0, w: shelf.w, d: shelf.d }] };
-                levels.push(lvl);
-                tryPlace(lvl, u, placements);
-                done = true;
-            }
-        }
-        if (!done) unplaced.push(u);
+        if (bestLvl) { applyDeep(bestLvl, u, bestSpot, placements); continue; }
+        const used = levels.reduce((s, l) => s + l.height, 0);
+        if (u.h <= shelf.h - used) {
+            const lvl = { y: used, height: u.h, spaces: [{ x: 0, z: 0, w: shelf.w, d: shelf.d }] };
+            levels.push(lvl);
+            applyDeep(lvl, u, findDeepSpot(lvl, u), placements);
+        } else unplaced.push(u);
     }
     return { placements, unplaced };
 }
 
-function packAll(shelf, units) {
+// --- Single-depth mode: one row per level, best-fit gap along the width ---
+function orientOptions(shelf, u) {
+    const opts = [];
+    if (u.w <= shelf.d) opts.push({ L: u.l, W: u.w });
+    if (u.l <= shelf.d) opts.push({ L: u.w, W: u.l });
+    opts.sort((a, b) => a.L - b.L);
+    return opts;
+}
+
+function findSingleSpot(level, u, opts) {
+    let best = null;
+    for (const o of opts) {
+        for (let gi = 0; gi < level.gaps.length; gi++) {
+            const g = level.gaps[gi];
+            if (g.w >= o.L) {
+                const leftover = g.w - o.L;
+                if (!best || leftover < best.leftover) best = { gi, o, leftover };
+            }
+        }
+    }
+    return best;
+}
+
+function applySingle(level, u, spot, placements) {
+    const g = level.gaps[spot.gi];
+    placements.push({ x: g.x, z: 0, y: level.y, l: spot.o.L, w: spot.o.W, h: u.h, name: u.name });
+    const rest = g.w - spot.o.L;
+    level.gaps.splice(spot.gi, 1, ...(rest >= 50 ? [{ x: g.x + spot.o.L, w: rest }] : []));
+}
+
+function packShelfSingle(shelf, units) {
+    const minL = u => { const o = orientOptions(shelf, u); return o.length ? o[0].L : Infinity; };
+    const sorted = [...units].sort((a, b) => (b.h - a.h) || (minL(b) - minL(a)));
+    const levels = [], placements = [], unplaced = [];
+    for (const u of sorted) {
+        const opts = orientOptions(shelf, u);
+        if (!opts.length) { unplaced.push(u); continue; }
+        let bestLvl = null, bestSpot = null;
+        for (const lvl of levels) {
+            if (u.h > lvl.height) continue;
+            const spot = findSingleSpot(lvl, u, opts);
+            if (spot && (!bestSpot || spot.leftover < bestSpot.leftover)) { bestSpot = spot; bestLvl = lvl; }
+        }
+        if (bestLvl) { applySingle(bestLvl, u, bestSpot, placements); continue; }
+        const used = levels.reduce((s, l) => s + l.height, 0);
+        if (u.h <= shelf.h - used) {
+            const lvl = { y: used, height: u.h, gaps: [{ x: 0, w: shelf.w }] };
+            levels.push(lvl);
+            applySingle(lvl, u, findSingleSpot(lvl, u, opts), placements);
+        } else unplaced.push(u);
+    }
+    return { placements, unplaced };
+}
+
+function packAll(shelf, units, single) {
     if (shelf.w <= 0 || shelf.d <= 0 || shelf.h <= 0) return { shelves: [], tooBig: [] };
     const tooBig = [], packable = [];
     units.forEach(u => (fitsEmpty(shelf, u) ? packable : tooBig).push(u));
     const shelves = [];
     let remaining = packable;
     while (remaining.length && shelves.length < 99) {
-        const r = packShelf(shelf, remaining);
+        const r = single ? packShelfSingle(shelf, remaining) : packShelfDeep(shelf, remaining);
         shelves.push(r.placements);
         remaining = r.unplaced;
     }
@@ -358,11 +425,23 @@ function getShelf() {
 
 function recalcAll() {
     const shelf = getShelf();
+    const single = document.getElementById('single-toggle').checked;
     const units = [];
     storagePlan.forEach(it => { for (let i = 0; i < it.qty; i++) units.push({ name: it.name, l: it.l, w: it.w, h: it.h }); });
-    packResult = packAll(shelf, units);
+    packResult = packAll(shelf, units, single);
     viewShelf = 0;
-    updateTable(); updateSummary(); updateShelfNav(); buildScene(); updateStats();
+    updateTable(); updateSummary(); updateOverview(); syncView();
+}
+
+function syncView() {
+    const count = Math.max(1, packResult.shelves.length);
+    if (viewShelf > count - 1) viewShelf = count - 1;
+    document.getElementById('shelf-label').textContent = `Shelf ${viewShelf + 1} of ${count}`;
+    document.getElementById('prev-shelf').disabled = viewShelf === 0;
+    document.getElementById('next-shelf').disabled = viewShelf >= count - 1;
+    buildScene();
+    updateStats();
+    highlightOverview();
 }
 
 function updateTable() {
@@ -386,8 +465,7 @@ function updateTable() {
 }
 
 function updateSummary() {
-    const totalItems = storagePlan.reduce((s, i) => s + i.qty, 0);
-    document.getElementById('total-items').innerText = totalItems;
+    document.getElementById('total-items').innerText = storagePlan.reduce((s, i) => s + i.qty, 0);
     document.getElementById('total-shelves').innerText = packResult.shelves.length;
     const tb = document.getElementById('toobig-box');
     if (packResult.tooBig.length) {
@@ -400,12 +478,33 @@ function updateSummary() {
     } else tb.style.display = 'none';
 }
 
-function updateShelfNav() {
-    const count = Math.max(1, packResult.shelves.length);
-    if (viewShelf > count - 1) viewShelf = count - 1;
-    document.getElementById('shelf-label').textContent = `Shelf ${viewShelf + 1} of ${count}`;
-    document.getElementById('prev-shelf').disabled = viewShelf === 0;
-    document.getElementById('next-shelf').disabled = viewShelf >= count - 1;
+function updateOverview() {
+    const tbody = document.querySelector('#overview-table tbody');
+    tbody.innerHTML = '';
+    const shelf = getShelf();
+    if (!packResult.shelves.length) {
+        tbody.innerHTML = '<tr style="cursor:default;"><td colspan="5" style="text-align:center; color:var(--text-muted);">No items in plan yet.</td></tr>';
+        return;
+    }
+    packResult.shelves.forEach((placements, i) => {
+        const counts = {};
+        placements.forEach(p => counts[p.name] = (counts[p.name] || 0) + 1);
+        const summary = Object.entries(counts).map(([n, c]) => `${c} × ${n}`).join(', ');
+        const vol = placements.reduce((s, p) => s + p.l * p.w * p.h, 0);
+        const util = shelf.w * shelf.d * shelf.h > 0 ? Math.round(vol / (shelf.w * shelf.d * shelf.h) * 100) : 0;
+        const levels = new Set(placements.map(p => p.y)).size;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><strong>Shelf ${i + 1}</strong></td><td>${summary}</td><td>${placements.length}</td><td>${levels}</td><td>${util}%</td>`;
+        tr.addEventListener('click', () => { viewShelf = i; syncView(); });
+        tbody.appendChild(tr);
+    });
+}
+
+function highlightOverview() {
+    if (!packResult.shelves.length) return;
+    document.querySelectorAll('#overview-table tbody tr').forEach((tr, i) => {
+        tr.classList.toggle('active-row', i === viewShelf);
+    });
 }
 
 function updateStats() {
@@ -452,8 +551,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('clear-btn').addEventListener('click', () => { storagePlan = []; recalcAll(); });
-    document.getElementById('prev-shelf').addEventListener('click', () => { viewShelf--; updateShelfNav(); buildScene(); updateStats(); });
-    document.getElementById('next-shelf').addEventListener('click', () => { viewShelf++; updateShelfNav(); buildScene(); updateStats(); });
+    document.getElementById('prev-shelf').addEventListener('click', () => { viewShelf--; syncView(); });
+    document.getElementById('next-shelf').addEventListener('click', () => { viewShelf++; syncView(); });
+    document.getElementById('single-toggle').addEventListener('change', recalcAll);
     document.querySelectorAll('#shelf-w, #shelf-d, #shelf-h').forEach(i => i.addEventListener('input', recalcAll));
 
     init3D();
