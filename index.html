@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Museum Storage Planner - Phase 3a</title>
+<title>Museum Storage Planner - Phase 3b</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <style>
     :root {
@@ -66,7 +66,7 @@
 <div class="container">
     <header>
         <h1>Museum Storage Planner</h1>
-        <p style="margin:5px 0 0 0; color:var(--text-muted);">Phase 3a: Plans, Presets & 3D Mixed-Load Shelf Packer (dimensions in mm)</p>
+        <p style="margin:5px 0 0 0; color:var(--text-muted);">Phase 3b: Plans, Presets, 3D Packer & Manual Drag-and-Drop (dimensions in mm)</p>
     </header>
 
     <div class="card">
@@ -94,7 +94,7 @@
                     <button class="btn btn-secondary" id="file-import-btn">Import file</button>
                     <input type="file" id="file-import" accept=".json,application/json" style="display:none;">
                 </div>
-                <p class="hint">Your work autosaves in this browser after every change &mdash; closing the tab loses nothing.</p>
+                <p class="hint">Your work autosaves in this browser after every change &mdash; including manual box moves.</p>
             </div>
             <div>
                 <div class="form-group">
@@ -163,6 +163,10 @@
         <div class="card">
             <div class="viewer-bar">
                 <h2 style="margin:0;">5. 3D Visualisation</h2>
+                <div class="btn-row">
+                    <button class="btn btn-secondary" id="rotate-btn" style="padding:6px 14px; font-size:0.85rem;">Rotate (R)</button>
+                    <button class="btn btn-secondary" id="repack-btn" style="padding:6px 14px; font-size:0.85rem;">Re-pack</button>
+                </div>
                 <div>
                     <button class="btn btn-nav" id="prev-shelf">&larr;</button>
                     <span id="shelf-label" style="margin:0 10px; font-weight:600;">Shelf 1 of 1</span>
@@ -178,7 +182,7 @@
                 <span>Items on this shelf: <strong id="stat-items">0</strong></span>
                 <span>Tiers used: <strong id="stat-levels">0</strong></span>
             </div>
-            <p class="hint">Drag to rotate &bull; Scroll to zoom &bull; Hover a box for details. Boxes spread across the lowest free surfaces first (floor, then box tops) and only stack higher when every lower surface is full; anything stacked is fully supported.</p>
+            <p class="hint">Drag empty space to rotate view &bull; Scroll to zoom &bull; <strong>Drag a box to move it</strong> (green = valid, red = invalid) &bull; Click to select, R to rotate &bull; Re-pack restores the automatic layout. Manually moved boxes stay where you put them when the plan changes.</p>
         </div>
     </div>
 
@@ -222,12 +226,22 @@ const LS_PRESETS  = 'msp-presets';
 let storagePlan = [];
 let packResult = { shelves: [], tooBig: [] };
 let viewShelf = 0;
+let pendingManual = null; // manual placements to seed next recalc
 
 // ================= THREE.JS SETUP =================
 let scene, camera, renderer, itemsGroup, shelfGroup, raycaster, pointerNDC;
 let meshes = [];
 let theta = Math.PI / 4, phi = Math.PI / 3.2, dist = 3000;
 const target = new THREE.Vector3();
+
+// drag / selection state
+let dragMode = null;           // 'camera' | 'box'
+let dragMesh = null, dragOrig = null, dragCand = null, dragValid = false, dragY = 0;
+const dragPlane = new THREE.Plane();
+const dragPoint = new THREE.Vector3();
+const dragOffset = { x: 0, z: 0 };
+let selectedMesh = null;
+const SEL_EMISSIVE = 0x1b4f72;
 
 function init3D() {
     scene = new THREE.Scene();
@@ -245,20 +259,141 @@ function init3D() {
     pointerNDC = new THREE.Vector2();
 
     const canvas = renderer.domElement;
-    let dragging = false, lx = 0, ly = 0;
-    canvas.addEventListener('pointerdown', e => { dragging = true; lx = e.clientX; ly = e.clientY; canvas.setPointerCapture(e.pointerId); });
-    canvas.addEventListener('pointerup', () => { dragging = false; });
+    let lx = 0, ly = 0;
+
+    canvas.addEventListener('pointerdown', e => {
+        if (e.button !== 0) return;
+        canvas.setPointerCapture(e.pointerId);
+        lx = e.clientX; ly = e.clientY;
+        const hit = pick(e);
+        if (hit) {
+            dragMode = 'box';
+            dragMesh = hit;
+            select(hit);
+            const p = hit.userData;
+            dragOrig = { x: p.x, z: p.z, y: p.y };
+            dragCand = null; dragValid = false;
+            dragPlane.set(new THREE.Vector3(0, 1, 0), -p.y);
+            const pt = rayToPoint(e);
+            if (pt) { dragOffset.x = (p.x + p.l / 2) - pt.x; dragOffset.z = (p.z + p.w / 2) - pt.z; }
+            hideTip();
+        } else {
+            dragMode = 'camera';
+            select(null);
+        }
+    });
+
+    canvas.addEventListener('pointerup', () => {
+        if (dragMode === 'box' && dragMesh) {
+            const p = dragMesh.userData;
+            if (dragValid && dragCand) {
+                p.x = dragCand.x; p.z = dragCand.z; p.y = dragY; p.manual = true;
+            } else {
+                p.x = dragOrig.x; p.z = dragOrig.z; p.y = dragOrig.y;
+            }
+            dragMesh.position.set(p.x + p.l / 2, p.y + p.h / 2, p.z + p.w / 2);
+            dragMesh.material.emissive.setHex(dragMesh === selectedMesh ? SEL_EMISSIVE : 0x000000);
+            updateStats(); updateOverview(); highlightOverview(); autosave();
+        }
+        dragMode = null; dragMesh = null; dragCand = null;
+    });
+
     canvas.addEventListener('pointermove', e => {
-        if (dragging) {
+        if (dragMode === 'box' && dragMesh) {
+            const pt = rayToPoint(e);
+            if (!pt) return;
+            const shelf = getShelf();
+            const p = dragMesh.userData;
+            let nx = pt.x + dragOffset.x - p.l / 2;
+            let nz = pt.z + dragOffset.z - p.w / 2;
+            nx = Math.max(0, Math.min(shelf.w - p.l, nx));
+            nz = Math.max(0, Math.min(shelf.d - p.w, nz));
+            const drop = computeDrop(p, nx, nz);
+            dragValid = drop.valid; dragY = drop.y; dragCand = { x: nx, z: nz };
+            dragMesh.position.set(nx + p.l / 2, drop.y + p.h / 2, nz + p.w / 2);
+            dragMesh.material.emissive.setHex(drop.valid ? 0x145a32 : 0x7b241c);
+            hideTip();
+            updateCamera();
+        } else if (dragMode === 'camera') {
             theta -= (e.clientX - lx) * 0.006;
             phi = Math.min(1.45, Math.max(0.15, phi - (e.clientY - ly) * 0.006));
             lx = e.clientX; ly = e.clientY;
             hideTip(); updateCamera();
-        } else hover(e);
+        } else {
+            hover(e);
+        }
     });
+
     canvas.addEventListener('wheel', e => { e.preventDefault(); dist = Math.min(20000, Math.max(300, dist * (1 + e.deltaY * 0.001))); updateCamera(); }, { passive: false });
     window.addEventListener('resize', resizeRenderer);
     resizeRenderer();
+}
+
+function pick(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointerNDC, camera);
+    const hits = raycaster.intersectObjects(meshes, false);
+    return hits.length ? hits[0].object : null;
+}
+
+function rayToPoint(e) {
+    const rect = renderer.domElement.getBoundingClientRect();
+    pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointerNDC, camera);
+    return raycaster.ray.intersectPlane(dragPlane, dragPoint) ? dragPoint : null;
+}
+
+function select(mesh) {
+    if (selectedMesh && selectedMesh !== mesh) selectedMesh.material.emissive.setHex(0x000000);
+    selectedMesh = mesh;
+    if (mesh) mesh.material.emissive.setHex(SEL_EMISSIVE);
+}
+
+// Where would a box dropped at (x,z) land, and is it legal?
+function computeDrop(p, x, z) {
+    const shelf = getShelf();
+    const placements = packResult.shelves[viewShelf] || [];
+    const l = p.l, w = p.w, h = p.h, T = 1;
+    let y = 0;
+    for (const q of placements) {
+        if (q === p) continue;
+        if (q.x <= x + T && x + l <= q.x + q.l + T && q.z <= z + T && z + w <= q.z + q.w + T) {
+            if (q.y + q.h > y) y = q.y + q.h;
+        }
+    }
+    let valid = y + h <= shelf.h + T;
+    if (valid) {
+        for (const q of placements) {
+            if (q === p) continue;
+            const ox = x < q.x + q.l - T && q.x < x + l - T;
+            const oz = z < q.z + q.w - T && q.z < z + w - T;
+            if (ox && oz && y < q.y + q.h - T && q.y < y + h - T) { valid = false; break; }
+        }
+    }
+    return { y, valid };
+}
+
+function rotateSelected() {
+    if (!selectedMesh) return;
+    const p = selectedMesh.userData;
+    const shelf = getShelf();
+    const orig = { l: p.l, w: p.w };
+    p.l = orig.w; p.w = orig.l;
+    const nx = Math.max(0, Math.min(shelf.w - p.l, p.x));
+    const nz = Math.max(0, Math.min(shelf.d - p.w, p.z));
+    const drop = computeDrop(p, nx, nz);
+    if (drop.valid) {
+        p.x = nx; p.z = nz; p.y = drop.y; p.manual = true;
+        buildScene();
+        const m = meshes.find(m => m.userData === p);
+        select(m || null);
+        updateStats(); updateOverview(); highlightOverview(); autosave();
+    } else {
+        p.l = orig.l; p.w = orig.w; // rotation not legal here
+    }
 }
 
 function resizeRenderer() {
@@ -291,7 +426,7 @@ function hover(e) {
         tip.style.display = 'block';
         tip.style.left = (e.clientX - rect.left + 14) + 'px';
         tip.style.top = (e.clientY - rect.top + 14) + 'px';
-        tip.textContent = `${d.name} — ${d.l} × ${d.w} × ${d.h} mm`;
+        tip.textContent = `${d.name} — ${d.l} × ${d.w} × ${d.h} mm${d.manual ? ' (manual)' : ''}`;
     } else hideTip();
 }
 function hideTip() { document.getElementById('tooltip').style.display = 'none'; }
@@ -311,6 +446,7 @@ function buildScene() {
         }
     });
     meshes = [];
+    selectedMesh = null;
 
     if (shelf.w > 0 && shelf.d > 0 && shelf.h > 0) {
         const edges = new THREE.LineSegments(
@@ -350,12 +486,7 @@ function buildScene() {
     updateCamera();
 }
 
-// ================= PACKING: SUPPORT SURFACES, LOWEST FIRST =================
-// The floor and every placed box top is a "support surface" with free space.
-// Each new box goes to the LOWEST surface that has room (floor first, then
-// box tops), spreading side-by-side across a surface before any second tier
-// begins. A box is always fully contained within the single surface below it
-// (no overhangs, no see-saws).
+// ================= PACKING: SUPPORT SURFACES + FIXED MANUAL ITEMS =================
 function fitsEmpty(shelf, u) {
     const fp = (u.l <= shelf.w && u.w <= shelf.d) || (u.w <= shelf.w && u.l <= shelf.d);
     return fp && u.h <= shelf.h;
@@ -365,6 +496,30 @@ function makeSupport(x, z, l, w, y, single) {
     return single
         ? { x, z, l, w, y, gaps: [{ x: 0, w: l }] }
         : { x, z, l, w, y, spaces: [{ x: 0, z: 0, w: l, d: w }] };
+}
+
+function subtractRect(spaces, r) {
+    const out = [];
+    for (const s of spaces) {
+        if (r.x >= s.x + s.w || r.x + r.w <= s.x || r.z >= s.z + s.d || r.z + r.d <= s.z) { out.push(s); continue; }
+        if (r.x > s.x) out.push({ x: s.x, z: s.z, w: r.x - s.x, d: s.d });
+        if (r.x + r.w < s.x + s.w) out.push({ x: r.x + r.w, z: s.z, w: s.x + s.w - (r.x + r.w), d: s.d });
+        const ox = Math.min(s.x + s.w, r.x + r.w) - Math.max(s.x, r.x);
+        if (r.z > s.z) out.push({ x: Math.max(s.x, r.x), z: s.z, w: ox, d: r.z - s.z });
+        if (r.z + r.d < s.z + s.d) out.push({ x: Math.max(s.x, r.x), z: r.z + r.d, w: ox, d: s.z + s.d - (r.z + r.d) });
+    }
+    return out.filter(s => s.w >= 50 && s.d >= 50);
+}
+
+function subtractGap(gaps, x0, w0) {
+    const out = [];
+    for (const g of gaps) {
+        const gx2 = g.x + g.w, x2 = x0 + w0;
+        if (x2 <= g.x || x0 >= gx2) { out.push(g); continue; }
+        if (x0 > g.x) out.push({ x: g.x, w: Math.min(x0, gx2) - g.x });
+        if (x2 < gx2) out.push({ x: Math.max(x2, g.x), w: gx2 - Math.max(x2, g.x) });
+    }
+    return out.filter(g => g.w >= 50);
 }
 
 function findSpotDeep(sup, u) {
@@ -402,13 +557,38 @@ function findSpotSingle(sup, u) {
     return best;
 }
 
-function packShelf(shelf, units, single) {
-    const sorted = [...units].sort((a, b) => (b.l * b.w - a.l * a.w) || (b.h - a.h));
+function packShelf(shelf, units, single, fixed) {
     const placements = [], unplaced = [];
     const supports = [makeSupport(0, 0, shelf.w, shelf.d, 0, single)];
+    const E = 1;
 
+    // seed manually-placed (fixed) boxes first, lowest first
+    const demoted = [];
+    const sortedFixed = [...(fixed || [])].sort((a, b) => a.y - b.y);
+    for (const f of sortedFixed) {
+        if (!fitsEmpty(shelf, f)) { demoted.push(f); continue; }
+        const sup = supports.find(s => Math.abs(s.y - f.y) < E &&
+            f.x >= s.x - E && f.x + f.l <= s.x + s.l + E &&
+            f.z >= s.z - E && f.z + f.w <= s.z + s.w + E);
+        let ok = false;
+        if (sup) {
+            ok = single
+                ? sup.gaps.some(g => f.x >= sup.x + g.x - E && f.x + f.l <= sup.x + g.x + g.w + E)
+                : sup.spaces.some(s2 =>
+                    f.x >= sup.x + s2.x - E && f.x + f.l <= sup.x + s2.x + s2.w + E &&
+                    f.z >= sup.z + s2.z - E && f.z + f.w <= sup.z + s2.z + s2.d + E);
+        }
+        if (!ok) { demoted.push(f); continue; }
+        if (single) sup.gaps = subtractGap(sup.gaps, f.x - sup.x, f.l);
+        else sup.spaces = subtractRect(sup.spaces, { x: f.x - sup.x, z: f.z - sup.z, w: f.l, d: f.w });
+        placements.push({ x: f.x, z: f.z, y: f.y, l: f.l, w: f.w, h: f.h, name: f.name, manual: true });
+        supports.push(makeSupport(f.x, f.z, f.l, f.w, f.y + f.h, single));
+    }
+
+    // then auto-pack the rest around them
+    const sorted = [...demoted, ...units].sort((a, b) => (b.l * b.w - a.l * a.w) || (b.h - a.h));
     for (const u of sorted) {
-        let best = null; // { sup, spot }
+        let best = null;
         for (const sup of supports) {
             if (sup.y + u.h > shelf.h) continue;
             const spot = single ? findSpotSingle(sup, u) : findSpotDeep(sup, u);
@@ -436,25 +616,62 @@ function packShelf(shelf, units, single) {
             if (s.d - spot.W >= 50) ns.push({ x: s.x, z: s.z + spot.W, w: spot.L, d: s.d - spot.W });
             sup.spaces.splice(spot.i, 1, ...ns);
         }
-
-        // the new box's top becomes a support surface in turn
         supports.push(makeSupport(p.x, p.z, p.l, p.w, p.y + u.h, single));
     }
     return { placements, unplaced };
 }
 
-function packAll(shelf, units, single) {
-    if (shelf.w <= 0 || shelf.d <= 0 || shelf.h <= 0) return { shelves: [], tooBig: [] };
-    const tooBig = [], packable = [];
-    units.forEach(u => (fitsEmpty(shelf, u) ? packable : tooBig).push(u));
+function collectManual() {
+    const out = [];
+    (packResult.shelves || []).forEach((pl, si) => pl.forEach(p => {
+        if (p.manual) out.push({ s: si, name: p.name, l: p.l, w: p.w, h: p.h, x: p.x, y: p.y, z: p.z });
+    }));
+    return out;
+}
+
+function recalcAll() {
+    const shelf = getShelf();
+    const single = document.getElementById('single-toggle').checked;
+    const fixed = pendingManual !== null ? pendingManual : collectManual();
+    pendingManual = null;
+
+    const need = {};
+    storagePlan.forEach(it => need[it.name] = (need[it.name] || 0) + it.qty);
+
+    // keep manual placements only for items still in the plan
+    const usedCount = {}, fixedUse = [];
+    fixed.forEach(f => {
+        if ((usedCount[f.name] || 0) < (need[f.name] || 0) && fitsEmpty(shelf, f)) {
+            usedCount[f.name] = (usedCount[f.name] || 0) + 1;
+            fixedUse.push(f);
+        }
+    });
+
+    const autoUnits = [], tooBig = [];
+    storagePlan.forEach(it => {
+        const autoCount = it.qty - (usedCount[it.name] || 0);
+        for (let i = 0; i < autoCount; i++) {
+            const u = { name: it.name, l: it.l, w: it.w, h: it.h };
+            (fitsEmpty(shelf, u) ? autoUnits : tooBig).push(u);
+        }
+    });
+
     const shelves = [];
-    let remaining = packable;
-    while (remaining.length && shelves.length < 99) {
-        const r = packShelf(shelf, remaining, single);
+    let remaining = autoUnits;
+    const maxFixedShelf = fixedUse.length ? Math.max(...fixedUse.map(f => f.s)) : -1;
+    let i = 0;
+    while (i < 99) {
+        const r = packShelf(shelf, remaining, single, fixedUse.filter(f => f.s === i));
         shelves.push(r.placements);
         remaining = r.unplaced;
+        if (!remaining.length && i >= maxFixedShelf) break;
+        i++;
     }
-    return { shelves, tooBig };
+
+    packResult = { shelves, tooBig };
+    viewShelf = 0;
+    updateTable(); updateSummary(); updateOverview(); syncView();
+    autosave();
 }
 
 // ================= PERSISTENCE (3a) =================
@@ -467,7 +684,8 @@ function currentState() {
         name: document.getElementById('plan-name').value.trim() || 'Untitled plan',
         shelf: getShelf(),
         singleDepth: document.getElementById('single-toggle').checked,
-        items: storagePlan
+        items: storagePlan,
+        manual: collectManual()
     };
 }
 
@@ -491,6 +709,10 @@ function applyState(data) {
         name: String(it.name), l: num(it.l, 0), w: num(it.w, 0), h: num(it.h, 0), qty: Math.floor(num(it.qty, 1))
     })) : [];
     document.getElementById('plan-name').value = data.name ? String(data.name) : 'Untitled plan';
+    pendingManual = Array.isArray(data.manual) ? data.manual.filter(m => m && m.name).map(m => ({
+        s: Math.floor(num(m.s, 0)), name: String(m.name), l: num(m.l, 0), w: num(m.w, 0), h: num(m.h, 0),
+        x: num(m.x, 0), y: num(m.y, 0), z: num(m.z, 0)
+    })) : [];
     recalcAll();
     return true;
 }
@@ -531,17 +753,6 @@ function getShelf() {
         d: parseFloat(document.getElementById('shelf-d').value) || 0,
         h: parseFloat(document.getElementById('shelf-h').value) || 0
     };
-}
-
-function recalcAll() {
-    const shelf = getShelf();
-    const single = document.getElementById('single-toggle').checked;
-    const units = [];
-    storagePlan.forEach(it => { for (let i = 0; i < it.qty; i++) units.push({ name: it.name, l: it.l, w: it.w, h: it.h }); });
-    packResult = packAll(shelf, units, single);
-    viewShelf = 0;
-    updateTable(); updateSummary(); updateOverview(); syncView();
-    autosave();
 }
 
 function syncView() {
@@ -677,6 +888,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('single-toggle').addEventListener('change', recalcAll);
     document.querySelectorAll('#shelf-w, #shelf-d, #shelf-h').forEach(i => i.addEventListener('input', recalcAll));
 
+    // ----- 3b: manual editing -----
+    document.getElementById('rotate-btn').addEventListener('click', rotateSelected);
+    document.getElementById('repack-btn').addEventListener('click', () => { pendingManual = []; recalcAll(); });
+    document.addEventListener('keydown', e => {
+        const tag = (document.activeElement && document.activeElement.tagName) || '';
+        if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+        if (e.key === 'r' || e.key === 'R') rotateSelected();
+    });
+
     // ----- Plans (3a) -----
     document.getElementById('plan-name').addEventListener('input', autosave);
 
@@ -710,6 +930,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (storagePlan.length && !confirm('Start a new plan? Current unsaved changes will be lost.')) return;
         storagePlan = [];
         document.getElementById('plan-name').value = 'Untitled plan';
+        pendingManual = [];
         recalcAll();
     });
 
