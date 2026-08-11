@@ -214,15 +214,23 @@ const standardBoxes = [
 const palette = ['#2980b9','#27ae60','#e67e22','#8e44ad','#c0392b','#16a085','#d35400','#f39c12','#7f8c8d','#9b59b6','#2c3e50','#1abc9c'];
 const colorMap = {};
 
+// ================= YOUR STORE PRESETS (mm) =================
 const builtinPresets = [
-    { name: 'Panel shelving',     w: 900,  d: 450,  h: 350  },
-    { name: 'Longspan bay',       w: 1800, d: 600,  h: 500  },
-    { name: 'Pallet racking bay', w: 2700, d: 1100, h: 1500 }
+    { name: 'Hurunui (Panel)',        w: 900,  d: 450, h: 320 },
+    { name: 'Waimakariri (Longspan)', w: 1800, d: 500, h: 340 },
+    { name: 'Textiles 1 (Longspan)',  w: 1800, d: 900, h: 300 },
+    { name: 'Textiles 2 (Longspan)',  w: 1800, d: 700, h: 300 },
+    { name: 'Otakaro (Panel)',        w: 900,  d: 300, h: 320 },
+    { name: 'Geology (Longspan)',     w: 1060, d: 750, h: 500 },
+    { name: 'Vertebrate (Longspan)',  w: 2190, d: 750, h: 375 },
+    { name: 'Wet store (Panel)',      w: 900,  d: 250, h: 150 },
+    { name: 'Pallet Racking short',   w: 2700, d: 900, h: 900 },
+    { name: 'Pallet Racking tall',    w: 2700, d: 900, h: 1500 }
 ];
 
 const LS_AUTOSAVE = 'msp-autosave';
 const LS_PLANS    = 'msp-plans';
-const LS_PRESETS  = 'msp-presets';
+const LS_PRESETS  = 'msp-presets-v2'; // versioned so old test presets are discarded
 
 let storagePlan = [];
 let packResult = { shelves: [], tooBig: [] };
@@ -737,7 +745,7 @@ function refreshPresetSelect() {
     sel.innerHTML = '<option value="">— apply a shelf preset —</option>';
     allPresets().forEach(p => {
         const o = document.createElement('option'); o.value = p.name;
-        o.textContent = `${p.name} (${p.w} × ${p.d} × ${p.h})`;
+        o.textContent = `${p.name} — ${p.w} × ${p.d} × ${p.h}`;
         sel.appendChild(o);
     });
 }
@@ -745,10 +753,10 @@ function refreshPresetSelect() {
 // ================= SIDE-VIEW THUMBNAILS =================
 function sideViewSVG(placements, shelf) {
     const W = Math.max(1, shelf.w), H = Math.max(1, shelf.h);
-    const sw = Math.max(W, H) / 150; // stroke scale
+    const sw = Math.max(W, H) / 150;
     let rects = '';
     placements.forEach(p => {
-        const ySvg = H - (p.y + p.h); // flip: floor at bottom
+        const ySvg = H - (p.y + p.h);
         rects += `<rect x="${p.x}" y="${ySvg}" width="${p.l}" height="${p.h}" fill="${getColor(p.name)}" stroke="#ffffff" stroke-width="${sw}" opacity="0.95"></rect>`;
     });
     return `<svg class="thumb-svg" width="180" height="72" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">` +
