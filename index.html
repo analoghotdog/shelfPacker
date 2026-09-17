@@ -226,10 +226,10 @@
     <div class="card">
         <h2>6. Shelf Loading Overview</h2>
         <table id="overview-table">
-            <thead><tr><th>Shelf</th><th>Side View</th><th>Contents</th><th>Items</th><th>Tiers</th><th>Fill</th></tr></thead>
+            <thead><tr><th>Shelf</th><th>Side View</th><th>Top View</th><th>Contents</th><th>Items</th><th>Tiers</th><th>Fill</th></tr></thead>
             <tbody></tbody>
         </table>
-        <p class="hint">Click a row to view that shelf in 3D. Thumbnails show the shelf from the side (width &times; height).</p>
+        <p class="hint">Click a row to view that shelf in 3D. Thumbnails show the shelf from the side (width &times; height) and top (width &times; depth).</p>
     </div>
 </div>
 
@@ -810,6 +810,18 @@ function sideViewSVG(placements, shelf) {
         rects + `</svg>`;
 }
 
+function topViewSVG(placements, shelf) {
+    const W = Math.max(1, shelf.w), D = Math.max(1, shelf.d);
+    const sw = Math.max(W, D) / 150;
+    let rects = '';
+    placements.forEach(p => {
+        rects += `<rect x="${p.x}" y="${p.z}" width="${p.l}" height="${p.w}" fill="${getColor(p.name)}" stroke="#ffffff" stroke-width="${sw}" opacity="0.95"></rect>`;
+    });
+    return `<svg class="thumb-svg" width="180" height="72" viewBox="0 0 ${W} ${D}" preserveAspectRatio="none">` +
+        `<rect x="${sw/2}" y="${sw/2}" width="${W-sw}" height="${D-sw}" fill="none" stroke="#34495e" stroke-width="${sw}"></rect>` +
+        rects + `</svg>`;
+}
+
 // ================= UI / STATE =================
 function getShelf() {
     return {
@@ -869,7 +881,7 @@ function updateOverview() {
     tbody.innerHTML = '';
     const shelf = getShelf();
     if (!packResult.shelves.length) {
-        tbody.innerHTML = '<tr style="cursor:default;"><td colspan="6" style="text-align:center; color:var(--ink-soft);">No items in plan yet.</td></tr>';
+        tbody.innerHTML = '<tr style="cursor:default;"><td colspan="7" style="text-align:center; color:var(--ink-soft);">No items in plan yet.</td></tr>';
         return;
     }
     packResult.shelves.forEach((placements, i) => {
@@ -880,7 +892,7 @@ function updateOverview() {
         const util = shelf.w * shelf.d * shelf.h > 0 ? Math.round(vol / (shelf.w * shelf.d * shelf.h) * 100) : 0;
         const tiers = new Set(placements.map(p => p.y)).size;
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td><strong>Shelf ${i + 1}</strong></td><td>${sideViewSVG(placements, shelf)}</td><td>${summary}</td><td>${placements.length}</td><td>${tiers}</td><td>${util}%</td>`;
+        tr.innerHTML = `<td><strong>Shelf ${i + 1}</strong></td><td>${sideViewSVG(placements, shelf)}</td><td>${topViewSVG(placements, shelf)}</td><td>${summary}</td><td>${placements.length}</td><td>${tiers}</td><td>${util}%</td>`;
         tr.addEventListener('click', () => { viewShelf = i; syncView(); });
         tbody.appendChild(tr);
     });
