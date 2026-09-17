@@ -61,6 +61,7 @@
         padding: 9px 18px; border: 1px solid transparent; border-radius: 2px;
         font-family: var(--font-body); font-size: 0.9rem; font-weight: 500; letter-spacing: 0.01em;
         cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s;
+        text-decoration: none; display: inline-block;
     }
     .btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .btn-primary { background: var(--moss); color: var(--surface); }
@@ -129,6 +130,7 @@
                     <button class="btn btn-secondary" id="plan-new">New</button>
                     <button class="btn btn-secondary" id="file-export">Export file</button>
                     <button class="btn btn-secondary" id="file-import-btn">Import file</button>
+                    <a class="btn btn-secondary" href="Put%20it%20on%20a%20Shelf.xlsm" download="Put it on a Shelf.xlsm">Download bulk import tool</a>
                     <input type="file" id="file-import" accept=".json,application/json" style="display:none;">
                 </div>
                 <p class="hint">Your work autosaves in this browser after every change &mdash; including manual box moves.</p>
@@ -141,9 +143,6 @@
                 <button class="btn btn-secondary" id="preset-save">Save current dims as preset</button>
                 <p class="hint">Picking a preset fills the location dimensions below (you can still edit them). Presets you save are stored in this browser.</p>
             </div>
-        </div>
-        <div style="display:flex; justify-content:flex-end; margin-top:16px;">
-            <a class="btn btn-secondary" href="Put%20it%20on%20a%20Shelf.xlsm" download="Put it on a Shelf.xlsm">Download bulk import tool</a>
         </div>
     </div>
 
