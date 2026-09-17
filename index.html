@@ -135,17 +135,17 @@
             </div>
             <div>
                 <div class="form-group">
-                    <label>Shelf presets</label>
+                    <label>Location (shelf or box) presets</label>
                     <select id="preset-select"></select>
                 </div>
                 <button class="btn btn-secondary" id="preset-save">Save current dims as preset</button>
-                <p class="hint">Picking a preset fills the shelf dimensions below (you can still edit them). Presets you save are stored in this browser.</p>
+                <p class="hint">Picking a preset fills the location dimensions below (you can still edit them). Presets you save are stored in this browser.</p>
             </div>
         </div>
     </div>
 
     <div class="card">
-        <h2>2. Shelf / Bay Specifications</h2>
+        <h2>2. Shelf / Box Specifications</h2>
         <div class="grid grid-3">
             <div class="form-group"><label>Internal Width (mm)</label><input type="number" id="shelf-w" value="1200" min="0"></div>
             <div class="form-group"><label>Internal Depth (mm)</label><input type="number" id="shelf-d" value="600" min="0"></div>
@@ -153,7 +153,7 @@
         </div>
         <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; font-weight:500; color:var(--ink); margin:0;">
             <input type="checkbox" id="single-toggle" style="width:auto; margin:0;">
-            Single-depth rows only (never place boxes behind boxes)
+            Single-depth rows only (never place boxes/items behind others)
         </label>
     </div>
 
@@ -234,18 +234,18 @@
 </div>
 
 <script>
-// ================= YOUR STANDARD BOXES (mm) =================
+// ================= YOUR STANDARD BOXES (mm) (height is external)=================
 const standardBoxes = [
-    { name: "Box C",  l: 430, w: 280, h: 92  },
-    { name: "Box D",  l: 435, w: 285, h: 187 },
-    { name: "Box E",  l: 585, w: 435, h: 92  },
-    { name: "Box F",  l: 585, w: 435, h: 187 },
-    { name: "Box A1", l: 682, w: 427, h: 280 },
-    { name: "Box A",  l: 685, w: 427, h: 140 },
-    { name: "Box B",  l: 877, w: 432, h: 140 },
-    { name: "Box B1", l: 877, w: 432, h: 280 },
-    { name: "Box G",  l: 430, w: 280, h: 300 },
-    { name: "Box H",  l: 215, w: 280, h: 300 }
+    { name: "Box C",  l: 430, w: 280, h: 95  },
+    { name: "Box D",  l: 435, w: 285, h: 190 },
+    { name: "Box E",  l: 585, w: 435, h: 95  },
+    { name: "Box F",  l: 585, w: 435, h: 190 },
+    { name: "Box A1", l: 682, w: 427, h: 285 },
+    { name: "Box A",  l: 685, w: 427, h: 145 },
+    { name: "Box B",  l: 877, w: 432, h: 145 },
+    { name: "Box B1", l: 877, w: 432, h: 285 },
+    { name: "Box G",  l: 430, w: 280, h: 305 },
+    { name: "Box H",  l: 215, w: 280, h: 305 }
 ];
 const palette = ['#6e7a5e','#b25f43','#7c8fa0','#a68a5b','#8f4931','#556b5d','#c99a5b','#5c6b7a','#9c7b58','#4c5842','#a37a6c','#7d8a6a'];
 const colorMap = {};
@@ -261,7 +261,17 @@ const builtinPresets = [
     { name: 'Vertebrate (Longspan)',  w: 2190, d: 750, h: 375 },
     { name: 'Wet store (Panel)',      w: 900,  d: 250, h: 150 },
     { name: 'Pallet Racking short',   w: 2700, d: 900, h: 900 },
-    { name: 'Pallet Racking tall',    w: 2700, d: 900, h: 1500 }
+    { name: 'Pallet Racking tall',    w: 2700, d: 900, h: 1500 },
+    { name: "Box C",  w: 430, d: 280, h: 95  },
+    { name: "Box D",  w: 435, d: 285, h: 190 },
+    { name: "Box E",  w: 585, d: 435, h: 95  },
+    { name: "Box F",  w: 585, d: 435, h: 190 },
+    { name: "Box A1", w: 682, d: 427, h: 285 },
+    { name: "Box A",  w: 685, d: 427, h: 145 },
+    { name: "Box B",  w: 877, d: 432, h: 145 },
+    { name: "Box B1", w: 877, d: 432, h: 285 },
+    { name: "Box G",  w: 430, d: 280, h: 305 },
+    { name: "Box H",  w: 215, d: 280, h: 305 }
 ];
 
 const LS_AUTOSAVE = 'msp-autosave';
@@ -778,7 +788,7 @@ function allPresets() {
 }
 function refreshPresetSelect() {
     const sel = document.getElementById('preset-select');
-    sel.innerHTML = '<option value="">— apply a shelf preset —</option>';
+    sel.innerHTML = '<option value="">— apply a shelf or box preset —</option>';
     allPresets().forEach(p => {
         const o = document.createElement('option'); o.value = p.name;
         o.textContent = `${p.name} — ${p.w} × ${p.d} × ${p.h}`;
