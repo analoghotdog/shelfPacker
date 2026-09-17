@@ -97,6 +97,15 @@
     .hint { font-size: 0.8rem; color: var(--ink-soft); margin: 10px 0 0 0; }
     .warning-box { margin-top: 12px; padding: 12px 14px; background: #f3e6df; border: 1px solid #e2c3b3; border-radius: 2px; color: var(--clay-deep); font-size: 0.88rem; display: none; }
     .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .mode-toggle { display: inline-flex; border: 1px solid var(--line); border-radius: 2px; overflow: hidden; }
+    .mode-btn {
+        padding: 8px 16px; border: none; background: var(--paper); color: var(--ink-soft);
+        font-family: var(--font-body); font-size: 0.85rem; font-weight: 500; cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+    }
+    .mode-btn + .mode-btn { border-left: 1px solid var(--line); }
+    .mode-btn.active { background: var(--moss); color: var(--surface); }
+    .mode-btn:hover:not(.active) { background: var(--surface); }
 </style>
 </head>
 <body>
@@ -106,6 +115,16 @@
         <span class="kicker">Museum storage &amp; shelf-fit planner</span>
         <p style="margin:5px 0 0 0; color:var(--text-muted);"></p>
     </header>
+
+    <div class="card" style="padding: 14px 24px;">
+        <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+            <label style="margin:0; font-size:0.72rem; font-weight:500; color:var(--ink-soft); letter-spacing:0.03em;">What are you packing?</label>
+            <div class="mode-toggle" role="group" aria-label="Packing mode">
+                <button type="button" class="mode-btn active" id="mode-shelf" data-mode="shelf">Boxes onto a shelf</button>
+                <button type="button" class="mode-btn" id="mode-box" data-mode="box">Items into a box</button>
+            </div>
+        </div>
+    </div>
 
     <div class="card">
         <h2>1. Plans & Files</h2>
@@ -137,7 +156,7 @@
             </div>
             <div>
                 <div class="form-group">
-                    <label>Location (shelf or box) presets</label>
+                    <label id="preset-label">Shelf presets</label>
                     <select id="preset-select"></select>
                 </div>
                 <button class="btn btn-secondary" id="preset-save">Save current dims as preset</button>
@@ -147,7 +166,7 @@
     </div>
 
     <div class="card">
-        <h2>2. Shelf / Box Specifications</h2>
+        <h2 id="container-heading">2. Shelf Specifications</h2>
         <div class="grid grid-3">
             <div class="form-group"><label>Internal Width (mm)</label><input type="number" id="shelf-w" value="1200" min="0"></div>
             <div class="form-group"><label>Internal Depth (mm)</label><input type="number" id="shelf-d" value="600" min="0"></div>
@@ -198,7 +217,7 @@
             </table>
             <div class="summary-box">
                 <div><span class="summary-val" id="total-items">0</span><span class="summary-label">Total Items</span></div>
-                <div><span class="summary-val" id="total-shelves">0</span><span class="summary-label">Shelves Required</span></div>
+                <div><span class="summary-val" id="total-shelves">0</span><span class="summary-label" id="total-shelves-label">Shelves Required</span></div>
             </div>
             <div class="warning-box" id="toobig-box"></div>
         </div>
@@ -222,7 +241,7 @@
             </div>
             <div class="viewer-stats">
                 <span>Fill: <strong id="stat-util">0%</strong></span>
-                <span>Items on this shelf: <strong id="stat-items">0</strong></span>
+                <span><span id="stat-items-label-text">Items on this shelf:</span> <strong id="stat-items">0</strong></span>
                 <span>Tiers used: <strong id="stat-levels">0</strong></span>
             </div>
             <p class="hint">Drag empty space to rotate view &bull; Scroll to zoom &bull; <strong>Drag a box to move it</strong> (green = valid, red = invalid) &bull; Click to select, R to rotate &bull; Re-pack restores the automatic layout. Manually moved boxes stay where you put them when the plan changes.</p>
@@ -230,12 +249,12 @@
     </div>
 
     <div class="card">
-        <h2>6. Shelf Loading Overview</h2>
+        <h2 id="overview-heading">6. Shelf Loading Overview</h2>
         <table id="overview-table">
-            <thead><tr><th>Shelf</th><th>Side View</th><th>Top View</th><th>Contents</th><th>Items</th><th>Tiers</th><th>Fill</th></tr></thead>
+            <thead><tr><th id="overview-col-header">Shelf</th><th>Side View</th><th>Top View</th><th>Contents</th><th>Items</th><th>Tiers</th><th>Fill</th></tr></thead>
             <tbody></tbody>
         </table>
-        <p class="hint">Click a row to view that shelf in 3D. Thumbnails show the shelf from the side (width &times; height) and top (width &times; depth).</p>
+        <p class="hint" id="overview-hint">Click a row to view that shelf in 3D. Thumbnails show the shelf from the side (width &times; height) and top (width &times; depth).</p>
     </div>
 </div>
 
@@ -258,26 +277,26 @@ const colorMap = {};
 
 // ================= YOUR STORE PRESETS (mm) =================
 const builtinPresets = [
-    { name: 'Hurunui (Panel)',        w: 900,  d: 450, h: 320 },
-    { name: 'Waimakariri (Longspan)', w: 1800, d: 500, h: 340 },
-    { name: 'Textiles 1 (Longspan)',  w: 1800, d: 900, h: 300 },
-    { name: 'Textiles 2 (Longspan)',  w: 1800, d: 700, h: 300 },
-    { name: 'Otakaro (Panel)',        w: 900,  d: 300, h: 320 },
-    { name: 'Geology (Longspan)',     w: 1060, d: 750, h: 500 },
-    { name: 'Vertebrate (Longspan)',  w: 2190, d: 750, h: 375 },
-    { name: 'Wet store (Panel)',      w: 900,  d: 250, h: 150 },
-    { name: 'Pallet Racking short',   w: 2700, d: 900, h: 900 },
-    { name: 'Pallet Racking tall',    w: 2700, d: 900, h: 1500 },
-    { name: "Box C",  w: 430, d: 280, h: 95  },
-    { name: "Box D",  w: 435, d: 285, h: 190 },
-    { name: "Box E",  w: 585, d: 435, h: 95  },
-    { name: "Box F",  w: 585, d: 435, h: 190 },
-    { name: "Box A1", w: 682, d: 427, h: 285 },
-    { name: "Box A",  w: 685, d: 427, h: 145 },
-    { name: "Box B",  w: 877, d: 432, h: 145 },
-    { name: "Box B1", w: 877, d: 432, h: 285 },
-    { name: "Box G",  w: 430, d: 280, h: 305 },
-    { name: "Box H",  w: 215, d: 280, h: 305 }
+    { name: 'Hurunui (Panel)',        w: 900,  d: 450, h: 320,  type: 'shelf' },
+    { name: 'Waimakariri (Longspan)', w: 1800, d: 500, h: 340,  type: 'shelf' },
+    { name: 'Textiles 1 (Longspan)',  w: 1800, d: 900, h: 300,  type: 'shelf' },
+    { name: 'Textiles 2 (Longspan)',  w: 1800, d: 700, h: 300,  type: 'shelf' },
+    { name: 'Otakaro (Panel)',        w: 900,  d: 300, h: 320,  type: 'shelf' },
+    { name: 'Geology (Longspan)',     w: 1060, d: 750, h: 500,  type: 'shelf' },
+    { name: 'Vertebrate (Longspan)',  w: 2190, d: 750, h: 375,  type: 'shelf' },
+    { name: 'Wet store (Panel)',      w: 900,  d: 250, h: 150,  type: 'shelf' },
+    { name: 'Pallet Racking short',   w: 2700, d: 900, h: 900,  type: 'shelf' },
+    { name: 'Pallet Racking tall',    w: 2700, d: 900, h: 1500, type: 'shelf' },
+    { name: "Box C",  w: 430, d: 280, h: 95,  type: 'box' },
+    { name: "Box D",  w: 435, d: 285, h: 190, type: 'box' },
+    { name: "Box E",  w: 585, d: 435, h: 95,  type: 'box' },
+    { name: "Box F",  w: 585, d: 435, h: 190, type: 'box' },
+    { name: "Box A1", w: 682, d: 427, h: 285, type: 'box' },
+    { name: "Box A",  w: 685, d: 427, h: 145, type: 'box' },
+    { name: "Box B",  w: 877, d: 432, h: 145, type: 'box' },
+    { name: "Box B1", w: 877, d: 432, h: 285, type: 'box' },
+    { name: "Box G",  w: 430, d: 280, h: 305, type: 'box' },
+    { name: "Box H",  w: 215, d: 280, h: 305, type: 'box' }
 ];
 
 const LS_AUTOSAVE = 'msp-autosave';
@@ -288,6 +307,7 @@ let storagePlan = [];
 let packResult = { shelves: [], tooBig: [] };
 let viewShelf = 0;
 let pendingManual = null;
+let packMode = 'shelf'; // 'shelf' = boxes onto a shelf, 'box' = items into a box
 
 // ================= THREE.JS SETUP =================
 let scene, camera, renderer, itemsGroup, shelfGroup, raycaster, pointerNDC;
@@ -742,6 +762,7 @@ function currentState() {
         shelf: getShelf(),
         singleDepth: document.getElementById('single-toggle').checked,
         singleHeight: document.getElementById('single-height-toggle').checked,
+        packMode: packMode,
         items: storagePlan,
         manual: collectManual()
     };
@@ -764,6 +785,7 @@ function applyState(data) {
     document.getElementById('shelf-h').value = num(s.h, 400);
     document.getElementById('single-toggle').checked = !!data.singleDepth;
     document.getElementById('single-height-toggle').checked = !!data.singleHeight;
+    applyMode(data.packMode === 'box' ? 'box' : 'shelf');
     storagePlan = Array.isArray(data.items) ? data.items.filter(validItem).map(it => ({
         name: String(it.name), l: num(it.l, 0), w: num(it.w, 0), h: num(it.h, 0), qty: Math.floor(num(it.qty, 1))
     })) : [];
@@ -797,12 +819,36 @@ function allPresets() {
 }
 function refreshPresetSelect() {
     const sel = document.getElementById('preset-select');
-    sel.innerHTML = '<option value="">— apply a shelf or box preset —</option>';
-    allPresets().forEach(p => {
-        const o = document.createElement('option'); o.value = p.name;
-        o.textContent = `${p.name} — ${p.w} × ${p.d} × ${p.h}`;
-        sel.appendChild(o);
-    });
+    const noun = packMode === 'box' ? 'box' : 'shelf';
+    sel.innerHTML = `<option value="">— apply a ${noun} preset —</option>`;
+    allPresets()
+        .filter(p => (p.type || 'shelf') === packMode)
+        .forEach(p => {
+            const o = document.createElement('option'); o.value = p.name;
+            o.textContent = `${p.name} — ${p.w} × ${p.d} × ${p.h}`;
+            sel.appendChild(o);
+        });
+}
+
+function applyMode(mode) {
+    packMode = mode === 'box' ? 'box' : 'shelf';
+    const noun = packMode === 'box' ? 'box' : 'shelf';
+    const Noun = packMode === 'box' ? 'Box' : 'Shelf';
+    const nounPlural = packMode === 'box' ? 'Boxes' : 'Shelves';
+    document.getElementById('mode-shelf').classList.toggle('active', packMode === 'shelf');
+    document.getElementById('mode-box').classList.toggle('active', packMode === 'box');
+    document.getElementById('container-heading').textContent = `2. ${Noun} Specifications`;
+    document.getElementById('preset-label').textContent = `${Noun} presets`;
+    document.getElementById('total-shelves-label').textContent = `${nounPlural} Required`;
+    document.getElementById('stat-items-label-text').textContent = `Items on this ${noun}:`;
+    document.getElementById('overview-heading').textContent = `6. ${Noun} Loading Overview`;
+    document.getElementById('overview-col-header').textContent = Noun;
+    document.getElementById('overview-hint').innerHTML =
+        `Click a row to view that ${noun} in 3D. Thumbnails show the ${noun} from the side (width &times; height) and top (width &times; depth).`;
+    refreshPresetSelect();
+    syncView();
+    updateSummary();
+    updateOverview();
 }
 
 // ================= SIDE-VIEW THUMBNAILS =================
@@ -843,7 +889,8 @@ function getShelf() {
 function syncView() {
     const count = Math.max(1, packResult.shelves.length);
     if (viewShelf > count - 1) viewShelf = count - 1;
-    document.getElementById('shelf-label').textContent = `Shelf ${viewShelf + 1} of ${count}`;
+    const Noun = packMode === 'box' ? 'Box' : 'Shelf';
+    document.getElementById('shelf-label').textContent = `${Noun} ${viewShelf + 1} of ${count}`;
     document.getElementById('prev-shelf').disabled = viewShelf === 0;
     document.getElementById('next-shelf').disabled = viewShelf >= count - 1;
     buildScene();
@@ -879,9 +926,9 @@ function updateSummary() {
         const counts = {};
         packResult.tooBig.forEach(u => counts[u.name] = (counts[u.name] || 0) + 1);
         tb.style.display = 'block';
-        tb.innerHTML = '<strong>Too large for this shelf spec:</strong> ' +
+        tb.innerHTML = `<strong>Too large for this ${packMode === 'box' ? 'box' : 'shelf'} spec:</strong> ` +
             Object.entries(counts).map(([n, c]) => `${c} × ${n}`).join(', ') +
-            '. Try a larger bay or racking.';
+            `. Try a larger ${packMode === 'box' ? 'box' : 'bay or racking'}.`;
     } else tb.style.display = 'none';
 }
 
@@ -900,8 +947,9 @@ function updateOverview() {
         const vol = placements.reduce((s, p) => s + p.l * p.w * p.h, 0);
         const util = shelf.w * shelf.d * shelf.h > 0 ? Math.round(vol / (shelf.w * shelf.d * shelf.h) * 100) : 0;
         const tiers = new Set(placements.map(p => p.y)).size;
+        const Noun = packMode === 'box' ? 'Box' : 'Shelf';
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td><strong>Shelf ${i + 1}</strong></td><td>${sideViewSVG(placements, shelf)}</td><td>${topViewSVG(placements, shelf)}</td><td>${summary}</td><td>${placements.length}</td><td>${tiers}</td><td>${util}%</td>`;
+        tr.innerHTML = `<td><strong>${Noun} ${i + 1}</strong></td><td>${sideViewSVG(placements, shelf)}</td><td>${topViewSVG(placements, shelf)}</td><td>${summary}</td><td>${placements.length}</td><td>${tiers}</td><td>${util}%</td>`;
         tr.addEventListener('click', () => { viewShelf = i; syncView(); });
         tbody.appendChild(tr);
     });
@@ -1054,18 +1102,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('preset-save').addEventListener('click', () => {
-        const name = prompt('Preset name:', 'My shelf');
+        const name = prompt('Preset name:', packMode === 'box' ? 'My box' : 'My shelf');
         if (!name || !name.trim()) return;
         const shelf = getShelf();
         const user = getUserPresets().filter(p => p.name !== name.trim());
-        user.push({ name: name.trim(), w: shelf.w, d: shelf.d, h: shelf.h });
+        user.push({ name: name.trim(), w: shelf.w, d: shelf.d, h: shelf.h, type: packMode });
         setUserPresets(user);
         refreshPresetSelect();
     });
 
+    document.getElementById('mode-shelf').addEventListener('click', () => applyMode('shelf'));
+    document.getElementById('mode-box').addEventListener('click', () => applyMode('box'));
+
     init3D();
     refreshPlanList();
-    refreshPresetSelect();
+    applyMode('shelf');
     let restored = null;
     try { restored = JSON.parse(localStorage.getItem(LS_AUTOSAVE)); } catch (e) {}
     if (restored) applyState(restored); else recalcAll();
