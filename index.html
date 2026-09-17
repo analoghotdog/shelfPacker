@@ -157,6 +157,10 @@
             <input type="checkbox" id="single-toggle" style="width:auto; margin:0;">
             Single-depth rows only (never place boxes/items behind others)
         </label>
+        <label style="display:flex; align-items:center; gap:10px; font-size:0.9rem; font-weight:500; color:var(--ink); margin:8px 0 0;">
+            <input type="checkbox" id="single-height-toggle" style="width:auto; margin:0;">
+            Single-height rows only (never place boxes/items on top of others)
+        </label>
     </div>
 
     <div class="card">
@@ -612,7 +616,7 @@ function findSpotSingle(sup, u) {
     return best;
 }
 
-function packShelf(shelf, units, single, fixed) {
+function packShelf(shelf, units, single, fixed, singleHeight) {
     const placements = [], unplaced = [];
     const supports = [makeSupport(0, 0, shelf.w, shelf.d, 0, single)];
     const E = 1;
@@ -636,7 +640,7 @@ function packShelf(shelf, units, single, fixed) {
         if (single) sup.gaps = subtractGap(sup.gaps, f.x - sup.x, f.l);
         else sup.spaces = subtractRect(sup.spaces, { x: f.x - sup.x, z: f.z - sup.z, w: f.l, d: f.w });
         placements.push({ x: f.x, z: f.z, y: f.y, l: f.l, w: f.w, h: f.h, name: f.name, manual: true });
-        supports.push(makeSupport(f.x, f.z, f.l, f.w, f.y + f.h, single));
+        if (!singleHeight) supports.push(makeSupport(f.x, f.z, f.l, f.w, f.y + f.h, single));
     }
 
     const sorted = [...demoted, ...units].sort((a, b) => (b.l * b.w - a.l * a.w) || (b.h - a.h));
@@ -669,7 +673,7 @@ function packShelf(shelf, units, single, fixed) {
             if (s.d - spot.W >= 50) ns.push({ x: s.x, z: s.z + spot.W, w: spot.L, d: s.d - spot.W });
             sup.spaces.splice(spot.i, 1, ...ns);
         }
-        supports.push(makeSupport(p.x, p.z, p.l, p.w, p.y + u.h, single));
+        if (!singleHeight) supports.push(makeSupport(p.x, p.z, p.l, p.w, p.y + u.h, single));
     }
     return { placements, unplaced };
 }
@@ -685,6 +689,7 @@ function collectManual() {
 function recalcAll() {
     const shelf = getShelf();
     const single = document.getElementById('single-toggle').checked;
+    const singleHeight = document.getElementById('single-height-toggle').checked;
     const fixed = pendingManual !== null ? pendingManual : collectManual();
     pendingManual = null;
 
@@ -713,7 +718,7 @@ function recalcAll() {
     const maxFixedShelf = fixedUse.length ? Math.max(...fixedUse.map(f => f.s)) : -1;
     let i = 0;
     while (i < 99) {
-        const r = packShelf(shelf, remaining, single, fixedUse.filter(f => f.s === i));
+        const r = packShelf(shelf, remaining, single, fixedUse.filter(f => f.s === i), singleHeight);
         shelves.push(r.placements);
         remaining = r.unplaced;
         if (!remaining.length && i >= maxFixedShelf) break;
@@ -736,6 +741,7 @@ function currentState() {
         name: document.getElementById('plan-name').value.trim() || 'Untitled plan',
         shelf: getShelf(),
         singleDepth: document.getElementById('single-toggle').checked,
+        singleHeight: document.getElementById('single-height-toggle').checked,
         items: storagePlan,
         manual: collectManual()
     };
@@ -757,6 +763,7 @@ function applyState(data) {
     document.getElementById('shelf-d').value = num(s.d, 600);
     document.getElementById('shelf-h').value = num(s.h, 400);
     document.getElementById('single-toggle').checked = !!data.singleDepth;
+    document.getElementById('single-height-toggle').checked = !!data.singleHeight;
     storagePlan = Array.isArray(data.items) ? data.items.filter(validItem).map(it => ({
         name: String(it.name), l: num(it.l, 0), w: num(it.w, 0), h: num(it.h, 0), qty: Math.floor(num(it.qty, 1))
     })) : [];
@@ -964,6 +971,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('prev-shelf').addEventListener('click', () => { viewShelf--; syncView(); });
     document.getElementById('next-shelf').addEventListener('click', () => { viewShelf++; syncView(); });
     document.getElementById('single-toggle').addEventListener('change', recalcAll);
+    document.getElementById('single-height-toggle').addEventListener('change', recalcAll);
     document.querySelectorAll('#shelf-w, #shelf-d, #shelf-h').forEach(i => i.addEventListener('input', recalcAll));
 
     document.getElementById('rotate-btn').addEventListener('click', rotateSelected);
